@@ -1,7 +1,7 @@
 # Lovable Cloud to Supabase Migration
 
-[![Version](https://img.shields.io/badge/version-3.0.0-blue)](https://github.com/CarolMonroe22/lovable-cloud-to-supabase-migration)
-[![Tested](https://img.shields.io/badge/tested-2026--05--10-green)](https://github.com/CarolMonroe22/lovable-cloud-to-supabase-migration)
+[![Version](https://img.shields.io/badge/version-3.1.0-blue)](https://github.com/CarolMonroe22/lovable-cloud-to-supabase-migration)
+[![Tested](https://img.shields.io/badge/tested-2026--05--12-green)](https://github.com/CarolMonroe22/lovable-cloud-to-supabase-migration)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](./LICENSE)
 
 Migrate your entire Lovable Cloud project to your own Supabase. Schema, data, auth users (with original passwords and identities), storage (public and private buckets), edge functions (with correct verify_jwt per function), and frontend code.
@@ -11,7 +11,7 @@ Migrate your entire Lovable Cloud project to your own Supabase. Schema, data, au
 | **From** | Lovable Cloud (managed database) |
 | **To** | Your own Supabase project (full dashboard, custom emails, service role key) |
 | **What moves** | Everything: schema, data, auth users with passwords and identities, storage, edge functions, code |
-| **How** | 65 deterministic steps across 9 phases. Your agent does the work, you just connect Supabase and GitHub in the Lovable dashboard |
+| **How** | 68 deterministic steps across 9 phases. Your agent does the work, you just connect Supabase and GitHub in the Lovable dashboard |
 
 ## Install
 
@@ -21,11 +21,21 @@ npx skills add CarolMonroe22/lovable-cloud-to-supabase-migration
 
 Once installed, your AI agent picks it up automatically whenever you ask about migrating from Lovable Cloud.
 
-## v3.0.0 - What's New
+## v3.1.0 - What's New
 
-This version integrates 12 real-world traps discovered during production migrations that v2 didn't catch. Every trap is now an explicit step in the migration flow, not a separate document.
+v3.1 adds detection of advanced components that complex projects depend on: cron jobs, vault secrets, and database extensions. These are scanned during Phase 1 and flagged for manual recreation in the destination.
 
-| Trap | What v2 missed | What v3 does |
+| New in v3.1 | What it does |
+|---|---|
+| Database extensions scan | Detects all extensions (pg_cron, pgcrypto, pg_vector, etc.) and enables them in the destination |
+| Cron job detection | Scans cron.job table and reminds you to recreate scheduled tasks |
+| Vault secrets detection | Scans vault.secrets names (never values) and reminds you to re-enter them |
+
+### v3.0.0
+
+Integrated 15 real-world traps as explicit steps in the migration flow.
+
+| Trap | What went wrong | What the skill does |
 |---|---|---|
 | TanStack detection | Created destination with wrong framework | Auto-detects classic vs modern from package.json |
 | auth.identities | Password recovery and session refresh broke | Migrates identities alongside users |
@@ -39,8 +49,11 @@ This version integrates 12 real-world traps discovered during production migrati
 | pg_net | Storage migration failed | Enables extension early in Phase 3 |
 | us-east-1 outages | Project creation failed | Defaults to us-west-1 |
 | Phase 9 verification | Only counted tables | Compares 12 categories between source and destination |
+| Extensions not recreated | pg_cron, pgcrypto missing in destination | Scans and enables all source extensions |
+| Cron jobs lost | Scheduled tasks stopped silently | Detects and reports for manual recreation |
+| Vault secrets missing | Functions fail with missing secret errors | Detects secret names for manual re-entry |
 
-65 deterministic steps (up from 38) with exact tool calls, exact SQL, exact expected output. Agents follow steps exactly, no room for interpretation.
+68 deterministic steps with exact tool calls, exact SQL, exact expected output. Agents follow steps exactly, no room for interpretation.
 
 ## Not using Claude Code?
 
@@ -80,7 +93,7 @@ The skill runs 9 phases in order. Your agent handles everything except 2 clicks 
 
 | Phase | What happens |
 |---|---|
-| 1. Scan Source | Reads schema, data, auth users, identities, functions, triggers, sequences, indexes, storage, config.toml, and tech stack |
+| 1. Scan Source | Reads schema, data, auth users, identities, functions, triggers, sequences, indexes, storage, config.toml, tech stack, extensions, cron jobs, and vault secrets |
 | 2. Create Destination | Creates a new Supabase project (defaults to us-west-1) |
 | 3. Apply Schema | Recreates tables, enums, constraints, sequences with last_value, custom functions, triggers, indexes, and RLS policies |
 | 4. Auth Users | Imports users with original passwords AND identities (password recovery works) |
@@ -110,6 +123,10 @@ The skill runs 9 phases in order. Your agent handles everything except 2 clicks 
 | Edge function secrets inventory | Listed for manual setup |
 | Frontend code | Fully automated via GitHub |
 | TanStack detection (classic vs modern) | Fully automated |
+| Database extensions (pg_cron, pgcrypto, etc.) | Fully automated (detected and enabled) |
+| Cron jobs | Detected, listed for manual recreation |
+| Vault secrets | Names detected, values must be re-entered manually |
+| External workers (Fly.io, Railway, etc.) | Not detectable, mentioned in final checklist |
 | OAuth/redirect config | Manual (update provider settings in Supabase dashboard) |
 
 ## Good to Know
