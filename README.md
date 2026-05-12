@@ -30,10 +30,11 @@ v3.1 adds detection of advanced components that complex projects depend on: cron
 | Database extensions scan | Detects all extensions (pg_cron, pgcrypto, pg_vector, etc.) and enables them in the destination |
 | Cron job detection | Scans cron.job table and reminds you to recreate scheduled tasks |
 | Vault secrets detection | Scans vault.secrets names (never values) and reminds you to re-enter them |
+| Shared edge function code | Detects _shared/ directory and multi-file functions, recommends CLI deploy for reliability |
 
 ### v3.0.0
 
-Integrated 15 real-world traps as explicit steps in the migration flow.
+Integrated 16 real-world traps as explicit steps in the migration flow.
 
 | Trap | What went wrong | What the skill does |
 |---|---|---|
@@ -52,6 +53,7 @@ Integrated 15 real-world traps as explicit steps in the migration flow.
 | Extensions not recreated | pg_cron, pgcrypto missing in destination | Scans and enables all source extensions |
 | Cron jobs lost | Scheduled tasks stopped silently | Detects and reports for manual recreation |
 | Vault secrets missing | Functions fail with missing secret errors | Detects secret names for manual re-entry |
+| Shared edge function code | Functions fail with import errors | Detects _shared/ directory, recommends CLI deploy |
 
 68 deterministic steps with exact tool calls, exact SQL, exact expected output. Agents follow steps exactly, no room for interpretation.
 

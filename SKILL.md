@@ -631,37 +631,65 @@ Use Supabase MCP `deploy_edge_function` or Supabase CLI.
 Docs: [Edge Functions](https://supabase.com/docs/guides/functions) | [Deploy](https://supabase.com/docs/guides/functions/deploy)
 
 ```
-Step 50: List all edge functions from source repo
+Step 50: List all edge functions and detect shared code (Trap 16)
   Lovable MCP: read_file for supabase/functions/ directory listing at latest_sha
   Or scan the GitHub repo: supabase/functions/{name}/index.ts
   Save: edge_function_names
+
+  Check for shared code directory:
+  Lovable MCP: read_file at path supabase/functions/_shared/
+  If it exists, read ALL files in _shared/ recursively.
+  Common patterns: _shared/cors.ts, _shared/supabase-client.ts, _shared/utils.ts
+  Save: shared_function_files (may be empty)
+
+  If shared code exists and there are more than 10 edge functions,
+  recommend Supabase CLI deployment (Step 52 Option B) instead of
+  MCP one-by-one deployment. CLI handles shared imports automatically.
 
 Step 51: Read each function source and detect secrets (Trap 6)
   For each edge function:
   Lovable MCP: read_file at path supabase/functions/<name>/index.ts
 
+  Also check for multi-file functions:
+  Some functions have additional files beyond index.ts (e.g., types.ts, helpers.ts).
+  Lovable MCP: read_file for supabase/functions/<name>/ directory listing
+  Read ALL files in each function directory, not just index.ts.
+
   Grep for secrets the function uses:
-  Look for Deno.env.get("<SECRET_NAME>") calls.
+  Look for Deno.env.get("<SECRET_NAME>") calls across ALL function files.
   Track which secrets are needed, excluding auto-provided ones:
     - SUPABASE_URL (auto)
     - SUPABASE_ANON_KEY (auto)
     - SUPABASE_SERVICE_ROLE_KEY (auto)
     - SUPABASE_DB_URL (auto)
 
-  Save: function_sources, secrets_per_function
+  Grep for shared imports:
+  Look for imports from "../_shared/" or "../../_shared/" patterns.
+  If found and shared_function_files is empty, STOP - shared code was missed in Step 50.
 
-Step 52: Deploy each function with correct verify_jwt (Trap 5)
+  Save: function_sources (ALL files per function), secrets_per_function, shared_imports
+
+Step 52: Deploy each function with correct verify_jwt (Trap 5, Trap 16)
+  If shared_function_files is NOT empty or function count > 15:
+    STRONGLY RECOMMEND Option B (Supabase CLI) - it handles shared code
+    and deploys all functions in one command. MCP deploy_edge_function
+    does not support shared imports between functions.
+
+  Option A (MCP - only if NO shared code):
   Supabase MCP: deploy_edge_function
   For each function:
     name: same as source
-    files: [{ name: "index.ts", content: <source code from Step 48> }]
+    files: include ALL files from function directory (not just index.ts)
     verify_jwt: from verify_jwt_map (Step 3), default true if not specified
+
+  Option B (CLI - recommended for shared code or many functions):
+  The source repo should already be cloned from Phase 8 Step 56.
+  cd /tmp/source && supabase functions deploy --all --project-ref <dest_ref>
+  This deploys all functions including _shared/ imports in one command.
 
   Webhooks (Stripe, OAuth callbacks) typically need verify_jwt: false.
   User-facing functions typically need verify_jwt: true.
   Expected output: each function deployed successfully
-
-  Option B (faster): supabase functions deploy --all via CLI
 
 Step 53: Generate secrets inventory for the user (Trap 6)
   After all functions are deployed, compile the list of secrets:
@@ -841,7 +869,7 @@ Step 68: Final sign-off
 
 ## Integrated Traps Reference
 
-All 15 traps are integrated as explicit steps in their respective phases. This table maps each trap to its prevention step:
+All 16 traps are integrated as explicit steps in their respective phases. This table maps each trap to its prevention step:
 
 | Trap | Severity | Description | Prevention step |
 |---|---|---|---|
@@ -860,6 +888,7 @@ All 15 traps are integrated as explicit steps in their respective phases. This t
 | 13 | Silent bug | Database extensions not recreated | Step 16 (scan), Step 24 (enable all) |
 | 14 | Silent bug | Cron jobs lost silently | Step 17 (detect), Step 68 (remind to recreate) |
 | 15 | Silent bug | Vault secrets not migrated | Step 18 (detect names), Step 68 (remind to re-enter) |
+| 16 | Silent bug | Shared edge function code (_shared/) not deployed | Step 50 (detect), Step 52 (CLI deploy) |
 
 ## Common Mistakes to Avoid
 
@@ -878,6 +907,7 @@ All 15 traps are integrated as explicit steps in their respective phases. This t
 | Not scanning for cron jobs | Scheduled tasks stop running silently | Scan cron.job in Phase 1, remind in Phase 9 |
 | Not scanning for vault secrets | Functions fail at runtime with missing secrets | Scan vault.secrets names in Phase 1, remind in Phase 9 |
 | Only enabling pg_net extension | Other extensions (pg_cron, pgcrypto, etc.) missing | Scan all extensions in Phase 1, enable all in Phase 3 |
+| Deploying only index.ts per function | Functions with shared imports or multi-file structure fail | Read all files per function, use CLI if _shared/ exists |
 
 ## Things That Can Go Wrong
 
@@ -900,6 +930,8 @@ All 15 traps are integrated as explicit steps in their respective phases. This t
 | Cron jobs not running after migration | Cron jobs exist in source but not recreated (Trap 14) | Check cron_jobs from Step 17, recreate in destination |
 | Edge functions fail with missing extension | pg_cron or other extensions not enabled (Trap 13) | Enable all source extensions in Step 24 |
 | Vault-dependent functions return errors | Vault secrets not re-entered in destination (Trap 15) | Re-enter secret values in Supabase Dashboard -> Vault |
+| Edge functions deploy but fail with import errors | _shared/ directory not included in deployment (Trap 16) | Use `supabase functions deploy --all` via CLI instead of MCP |
+| Edge function deployment is extremely slow | Too many functions deployed one-by-one via MCP | Use CLI: `supabase functions deploy --all --project-ref <ref>` |
 
 ## Plan Requirements
 
