@@ -32,9 +32,9 @@ The restore brought storage.objects METADATA rows (ghosts pointing at files that
 
 ## Remix inherits Lovable Cloud
 
-If you remix a project that has Lovable Cloud, the remix also has Lovable Cloud enabled. You cannot disconnect it.
+If you remix a project that has Lovable Cloud, the remix comes with its own fresh Cloud state and wiring inherited from the original. That introduces operational ambiguity mid-migration: two Cloud instances, unclear which one your data lives in, and extra cleanup either way.
 
-**Solution:** Do NOT use remix for migration. Create a new empty project instead and push code via GitHub.
+**Solution:** Do NOT use remix for migration. Use the same-project path (Export + Remove + Connect on the original project, SKILL.md) or the fresh-project path (new EMPTY project + GitHub push, references/fresh-project-path.md).
 
 ---
 

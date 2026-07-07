@@ -50,7 +50,7 @@ For users without Claude Code, the edge function approach still works but is mor
 2. Call it to get JSON data
 3. Manually create tables in new Supabase
 4. Import data via Supabase dashboard or CLI
-5. Users must reset passwords (can't access auth.users without MCP)
+5. Users must reset passwords (this legacy method can't access auth.users - the native export and the MCP method both carry passwords, use those instead)
 
 See [export-methods.md](export-methods.md) for the edge function template.
 
