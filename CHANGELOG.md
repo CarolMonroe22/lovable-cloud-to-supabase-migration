@@ -2,6 +2,20 @@
 
 All notable changes to this skill, in human language.
 
+## v4.0.2 - 2026-07-07
+
+Follow-up fixes from the second review of the fresh-project path docs.
+
+### Fixed
+- Storage verification now describes the real response from the migrate-storage
+  helper (`succeeded` / `failed` / `total` / `results`) instead of the old
+  `ok: true` shape it stopped returning in v4.0.1.
+- The remix row in common mistakes no longer claims a remix "cannot connect own
+  Supabase". The real problem is that remix inherits its own fresh Cloud state,
+  leaving you with two Cloud instances mid-migration.
+- The "0 files migrated" troubleshooting row now points to Step 46 (signed URLs
+  for private buckets), not Step 43 (storage RLS policies).
+
 ## v4.0.0 - 2026-07-06 - "Cloud is no longer permanent"
 
 The big one. In July 2026 Lovable shipped official **Export**, **Pause**, and

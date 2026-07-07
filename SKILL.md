@@ -6,7 +6,7 @@ metadata:
   author: Carol Monroe - Lovable Champion and Supabase SupaSquad Member
   author_url: https://carolmonroe.com
   author_github: CarolMonroe22
-  version: "4.0.1"
+  version: "4.0.2"
   tested: "2026-07-06"
   tags:
     - supabase

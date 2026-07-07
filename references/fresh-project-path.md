@@ -526,7 +526,9 @@ Step 48: Verify storage migration
   SELECT id, status_code, content::jsonb, error_msg, created
   FROM net._http_response
   WHERE id = <request_id>;
-  Expected output: status_code = 200, all files ok: true
+  Expected output: status_code = 200, content shows failed = 0 and succeeded = total.
+  Each entry in results should have status: "success". If failed > 0, check the
+  error field on the failed entries before retrying.
 
   Also verify object count:
   SELECT count(*) FROM storage.objects;
@@ -810,7 +812,7 @@ All 16 traps are integrated as explicit steps in their respective phases. This t
 
 | Mistake | What happens | Correct approach |
 |---|---|---|
-| Using remix to copy project | Inherits Lovable Cloud, cannot connect own Supabase | Create new empty project + push code via GitHub |
+| Using remix to copy project | Remix inherits its own fresh Cloud state - two Cloud instances mid-migration, unclear where data lives | Create new empty project + push code via GitHub |
 | Generating temp passwords | Users cannot log in with original credentials | Copy encrypted_password bcrypt hashes from auth.users |
 | Inserting profiles before auth.users | FK violation, must drop constraint | Insert auth.users FIRST, then profiles |
 | Trying to pull code from GitHub into Lovable | GitHub integration is one-way OUT from Lovable | Push TO the connected GitHub repo from outside |
@@ -831,7 +833,7 @@ All 16 traps are integrated as explicit steps in their respective phases. This t
 |---|---|---|
 | `create_project` returns capacity error | us-east-1 outage (Trap 2) | Retry with `us-west-1` |
 | `net.http_post does not exist` | pg_net not enabled (Trap 3) | Run Step 24: `CREATE EXTENSION IF NOT EXISTS pg_net WITH SCHEMA extensions` |
-| Storage migration shows 0 files migrated | Private bucket, public URL returns 400 (Trap 4) | Use signed URLs from source (Step 43) |
+| Storage migration shows 0 files migrated | Private bucket, public URL returns 400 (Trap 4) | Use signed URLs from source (Step 46) |
 | Edge function returns 401 on webhook | verify_jwt is true but caller has no JWT (Trap 5) | Redeploy with `verify_jwt: false` per config.toml |
 | Edge function fails with "API key not configured" | Secrets not set in destination (Trap 6) | Set secrets in dashboard per Step 50 inventory |
 | Broken images after migration | URLs in JSONB not rewritten (Trap 7) | Re-run Step 40 on all text/jsonb columns |
