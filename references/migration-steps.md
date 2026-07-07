@@ -1,9 +1,14 @@
-# Migration Steps (Updated 2026-05-07)
+# Migration Steps (Updated 2026-07-06)
+
+> Since July 2026 the PRIMARY method is the native Export + Remove + Connect flow
+> on the same Lovable project - see SKILL.md. The methods below are the fallback
+> (fresh-project path, DB > 5 GB, or export unavailable).
 
 > Previous version of this guide said passwords can't be exported. That was WRONG.
-> Passwords CAN be migrated by copying the bcrypt hashes from auth.users.
+> Passwords CAN be migrated: they come in the native export, or by copying the
+> bcrypt hashes from auth.users via MCP.
 
-## Method: Full MCP Migration (Recommended)
+## Method: Full MCP Migration (fallback)
 
 This method uses Lovable MCP + Supabase MCP + GitHub CLI to automate the entire migration. Only 2 steps require manual dashboard clicks.
 
@@ -61,9 +66,11 @@ Limitation: Only gets data from tables with public SELECT RLS policies.
 
 ---
 
-## Disconnect Workaround (Stay in Lovable)
+## Fresh-Project Workaround (legacy - Cloud is removable since July 2026)
 
-Since Lovable Cloud can't be disconnected:
+No longer needed for the standard case: Cloud can now be REMOVED from the same
+project (SKILL.md primary path). Keep this only when the original project must
+stay untouched:
 
 1. Export everything using MCP method above
 2. Create new blank Lovable project

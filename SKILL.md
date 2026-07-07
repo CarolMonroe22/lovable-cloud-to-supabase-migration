@@ -1,13 +1,13 @@
 ---
 name: lovable-cloud-migration
-description: Guide for migrating from Lovable Cloud to your own Supabase project. Use when users ask about exporting data from Lovable Cloud, disconnecting Lovable Cloud, migrating to their own Supabase, getting data out of managed Lovable database, switching from Lovable Cloud to external Supabase, or Lovable Cloud limitations (no email templates, permanent once enabled, no direct Supabase dashboard access, no service role key).
+description: Guide for migrating from Lovable Cloud to your own Supabase project. Use when users ask about exporting data from Lovable Cloud, removing or disconnecting Lovable Cloud, pausing Lovable Cloud, restoring a Lovable Cloud .backup export, migrating to their own Supabase, getting data out of managed Lovable database, switching from Lovable Cloud to external Supabase, connecting their own Supabase to a Lovable project, or Lovable Cloud limitations (no SQL editor access, no custom auth emails, no direct Supabase dashboard access, no service role key).
 license: MIT
 metadata:
   author: Carol Monroe - Lovable Champion and Supabase SupaSquad Member
   author_url: https://carolmonroe.com
   author_github: CarolMonroe22
-  version: "3.1.0"
-  tested: "2026-05-12"
+  version: "4.0.0"
+  tested: "2026-07-06"
   tags:
     - supabase
     - lovable
@@ -15,764 +15,166 @@ metadata:
     - database
     - lovable-cloud
     - mcp
+    - export
 ---
 
 # Lovable Cloud to Own Supabase Migration
 
 > Created by **Carol Monroe** - Lovable Champion and Supabase SupaSquad Member
-> Actively used in production migrations. Last verified 2026-05-12
+> Every step verified on a real end-to-end migration (12 tables, 237 rows, 23 users,
+> 40 storage files, 5 edge functions, 2 cron jobs). Last verified 2026-07-06.
+
+## What Changed in v4 (July 2026)
+
+Lovable shipped official **Export**, **Pause**, and **Remove** buttons for Cloud
+(Cloud tab > Overview > Advanced settings). **Lovable Cloud is no longer permanent.**
+This rewrites the migration playbook:
+
+- The old "Cloud can never be disconnected" fact is obsolete. You can now export
+  your database, remove Cloud from the SAME project, and connect your own Supabase.
+- The native export file (a `pg_dump` custom-format backup) is now the PRIMARY data
+  source. It carries things the MCP flow had to reconstruct by hand, including
+  auth users WITH password hashes and identities.
+- The old 68-step MCP migration into a fresh Lovable project is now the FALLBACK
+  path, kept for the cases the native export cannot serve.
 
 ## What This Skill Does
 
-Migrates an entire Lovable Cloud project to your own Supabase - database schema (tables, enums, functions, triggers, sequences, indexes), data, auth users with original passwords, auth identities, storage assets (public and private buckets), edge functions with per-function verify_jwt, and frontend code. Detects advanced components (cron jobs, vault secrets, database extensions) and flags them for migration. 68 deterministic steps across 9 phases.
+Migrates an entire Lovable Cloud project to your own Supabase: database schema,
+data, RLS policies, functions, triggers, sequences, auth users with original
+passwords and identities, storage buckets and files, edge functions with correct
+per-function verify_jwt, cron jobs, and secrets inventory. Then removes Cloud and
+connects the user's own Supabase to the same Lovable project.
 
-## Lovable MCP Migrations
+## Decision Point (ALWAYS start here)
 
-The Lovable MCP introduced `query_database`, which gives full SQL access to Lovable Cloud databases - something previously impossible. This changes everything about how migrations work:
+Ask what the user actually needs, then pick the path:
 
-- **Before MCP:** Had to use edge function workarounds, REST API exports, and manual schema recreation. Passwords could not be exported. Schema had to be rebuilt by hand.
-- **With MCP:** Full SQL access to read schema, data, auth users (including password hashes), auth identities, RLS policies, enums, functions, triggers, sequences, indexes, constraints - everything needed for a complete migration.
+| User's situation | Path |
+|---|---|
+| "My app burns credits while I'm not working on it" | No migration. **Pause Cloud** (Cloud tab > Overview > Advanced settings). Done. |
+| "I want backups of my Cloud data" | No migration. **Export project data** works standalone, once per 24h, keep building on Cloud. |
+| Ready to run on own Supabase, database ≤ 5 GB | **SAME-PROJECT PATH** (primary, below): Export + Remove + Connect on the existing Lovable project. |
+| Database > 5 GB, export unavailable/failing, or user wants the original Cloud project kept untouched | **FRESH-PROJECT PATH** (legacy fallback): full MCP migration into a new Lovable project. See [references/fresh-project-path.md](references/fresh-project-path.md). |
 
-**Important:** The Lovable MCP is still in early stages. Tool availability and behavior may change. This skill documents what works as of May 2026.
+Remind the user: Export/Pause/Remove buttons cost no credits. Only agent prompts do.
 
-This skill is designed for **Claude Code** and **Claude (web)**, but can also be used in other MCP-compatible tools like **Cursor**.
+## Why Migrate at All (the right reasons)
 
-## When to Migrate (The Right Reasons)
+Lovable Cloud is a solid managed backend. Migration makes sense when the project
+needs things only a full Supabase setup provides:
 
-Lovable Cloud is a solid managed database that works well for many projects. You should consider migrating when:
+| You want to... | Why it needs your own Supabase |
+|---|---|
+| Customize auth emails (sender, design, content) | Cloud sends from `no-reply@auth.lovable.cloud` |
+| Access the full Supabase dashboard | SQL editor, extensions, logs, monitoring |
+| Use the service role key | Admin operations and some edge functions |
+| Have staging + production environments | Cloud is one database per project |
+| Own your infrastructure long-term | Your project, your org, your billing |
 
-- You need **full control** of your database (direct Supabase dashboard, custom extensions, service role key)
-- You need **custom email templates** (Lovable Cloud sends from no-reply@auth.lovable.cloud)
-- You need **separate staging/production environments** with independent databases
-- You want to **avoid vendor lock-in** and own your infrastructure
-- You need **direct Supabase dashboard access** for monitoring, logs, and advanced management
-
-Lovable Cloud cannot be disconnected once enabled - that is the main reason this migration guide exists. If you are happy with Cloud, there is no need to migrate.
-
-## Key Facts (Updated 2026-05-12)
-
-- Lovable Cloud **cannot be disconnected** once enabled
-- Lovable MCP `query_database` gives full SQL access to Cloud (including `auth.users` and `auth.identities`)
-- Auth passwords **CAN be migrated** - copy `encrypted_password` bcrypt hashes
-- Auth identities **MUST be migrated** alongside users or session recovery breaks
-- Storage files can be migrated via a temporary edge function
-- Private buckets require signed URLs for migration (public URL pattern returns 400)
-- GitHub sync is **two-way** - push from outside and Lovable picks it up
-- Remix **does NOT work** for migration - it inherits Lovable Cloud
-- No direct Supabase dashboard access with Lovable Cloud
-- Lovable changed its default tech_stack to TanStack Start on May 6, 2026 - detect and pass the correct value
-- `us-east-1` has had multiple capacity outages - default to `us-west-1`
-- New Supabase projects do NOT have `pg_net` enabled by default
-- Cron jobs (`pg_cron`), vault secrets, and custom extensions must be detected and recreated manually in the destination
-- External workers (Fly.io, Railway, etc.) that point to the source project URL must be re-pointed manually after migration
+If none of these apply and the user is happy on Cloud, say so: there is no need
+to migrate, and Export-as-backup + Pause cover most worries now.
 
 ## Prerequisites
 
-Before starting, verify the user has:
-
-| Requirement | How to install | Docs |
+| Requirement | Needed for | How to set up |
 |---|---|---|
-| Claude Code (Pro or Max) | [anthropic.com](https://docs.anthropic.com/en/docs/claude-code/overview) | [Claude Code docs](https://docs.anthropic.com/en/docs/claude-code/overview) |
-| Lovable MCP | `/mcp` in Claude Code, select Lovable | [Lovable MCP docs](https://docs.lovable.dev/integrations/mcp-servers) |
-| Supabase MCP plugin | Auto-available in Claude Code | [Supabase MCP docs](https://supabase.com/docs/guides/getting-started/mcp) |
-| GitHub CLI | `brew install gh` + `gh auth login` | [GitHub CLI quickstart](https://docs.github.com/en/github-cli/github-cli/quickstart) |
-| Lovable account with Cloud enabled | Any plan that has Cloud | [Lovable Cloud docs](https://docs.lovable.dev/integrations/cloud) |
-| Git | Usually pre-installed | - |
+| Lovable account with Cloud enabled | Everything | - |
+| Supabase account | Everything | https://supabase.com |
+| GitHub connected to the project | Everything (function code travels via the repo) | Editor > + menu > GitHub > Connect |
+| **Lovable MCP** | Strongly recommended - it makes life EASY: the baseline inventory, config.toml reading, and every source-side check become one tool call instead of manual dashboard reading | `/mcp` in Claude Code, or claude.ai Settings > Connectors - https://docs.lovable.dev/integrations/mcp-servers |
+| Supabase MCP | Destination-side automation (create project, run every verification) | Built into Claude Code - https://supabase.com/docs/guides/getting-started/mcp |
+| pg_restore 16+ with zstd | Same-project path Step 14 | macOS: `brew install postgresql@18` |
+| GitHub CLI (`gh`) | Fresh-project path only | `brew install gh` + `gh auth login` |
+| Supabase CLI | Optional - faster function deploys and storage uploads | https://supabase.com/docs/guides/getting-started |
 
-Optional but recommended:
-
-| Tool | Why | Docs |
-|---|---|---|
-| Supabase CLI | Faster edge function deployment (`supabase functions deploy --all`) | [Supabase CLI docs](https://supabase.com/docs/guides/getting-started) |
-| Supabase agent skills | Better SQL patterns and context | `npx skills add supabase/agent-skills` |
+Works in Claude Code and claude.ai, and also in other MCP-compatible agents like
+Cursor. Without any MCP, the same-project path still works - the user reads the
+counts off the Cloud panel by hand and Claude guides the terminal steps.
 
 ## Choose Migration Level
 
-Ask the user which level they want:
+Ask the user which level they want before starting:
 
 | Level | Audience | Behavior |
 |---|---|---|
 | **Guided** | First migration, not technical | Explain each phase, confirm before proceeding, show what is happening |
 | **Standard** | Knows Supabase/Lovable | Confirm key decisions, run phases with minimal pauses |
-| **Express** | Advanced, done it before | Ask for source + destination, run everything, report at end |
+| **Express** | Advanced, done it before | Ask for source + destination, run everything, report at the gate |
 
-## Migration Phases (68 Steps, Correct Order)
+Every level stops at the same hard checkpoints: cost confirmation, the Phase 7
+gate, and the Remove click.
 
-### Phase 1: Scan Source (Lovable Cloud) - Steps 1-18
+## Key Facts (verified 2026-07-06 on a live migration)
 
-Use Lovable MCP on the source project.
-Docs: [Lovable MCP](https://docs.lovable.dev/integrations/mcp-servers)
+### The native export
+- Format: `pg_dump` v18 **custom format** with **zstd compression** (source Postgres 17).
+- Restoring requires `pg_restore` v16+ **built with zstd**. The libpq build from
+  Homebrew does NOT include zstd and fails with "does not support compression with
+  zstd" even when the version number looks fine. Use `postgresql@18` (Trap 18).
+- INCLUDED: full schema (public, auth, storage, cron, vault), all table data, RLS
+  policies, triggers, custom functions, sequences WITH current values,
+  `auth.users` + `auth.identities` WITH bcrypt password hashes, `cron.job` rows,
+  `storage.buckets` + `storage.objects` rows (METADATA ONLY).
+- NOT included: storage FILES (actual bytes), edge function CODE (lives in the
+  repo), edge function SECRET values, vault secret VALUES (rows restore but are
+  encrypted with the old project's key, unrecoverable cross-project).
+- The export saves INTO the project's own Cloud storage as a bucket named like
+  `database_export_06_07_26`. **Download it before removing Cloud** - it dies with
+  Cloud (Trap 17). Limits: 5 GB, one export per 24 hours.
+- The "we'll email you" toast is unreliable. Don't wait for the email: check
+  Storage for the export bucket (~1 minute for a small database).
+
+### The Lovable side
+- After connecting an own Supabase, the Lovable agent CAN deploy edge functions to
+  it (confirmed directly with the agent, config.toml respected). It CANNOT set
+  edge function secrets - only the user can, in the Supabase dashboard.
+- `LOVABLE_API_KEY` is a managed WORKSPACE secret, independent of Cloud. It
+  SURVIVES Cloud removal. AI features keep working after re-wiring (Trap 25).
+- Connecting the Supabase integration auto-rewrites `.env` (correct URL + key, no
+  manual editing). But it may also overwrite `src/integrations/supabase/client.ts`
+  with a template that breaks SSR on modern (TanStack) stack projects (Trap 23).
+- GitHub sync is two-way. Temporary helper functions you delete in Supabase come
+  BACK if they still live in the repo - delete them everywhere (Trap 24).
+- Remix still does NOT work for migration - it inherits Lovable Cloud.
+
+### Security
+- The `.backup` file contains password hashes and personal data. Treat it like a
+  password: keep it local, never commit it, delete it after the migration.
+- If the database password touched a chat, a script, or an AI session during the
+  migration, rotate it at the end (Dashboard > Settings > Database).
+- Before pushing any migration artifacts to a public repo, scan them for project
+  refs, keys, emails, and personal data.
+
+## THE SACRED ORDER
 
 ```
-Step 1: Identify source project
-  Lovable MCP: list_workspaces - confirm workspace
-  Lovable MCP: get_project - get latest commit SHA and project metadata
-  Save: project_id, workspace_id, latest_sha
+1. EXPORT      the database (button)
+2. DOWNLOAD    the export + the storage files    ← they live inside Cloud
+3. BUILD       the new Supabase (restore, fix, upload, deploy)
+4. VERIFY      the 12-count gate — ALL GREEN or stop
+5. REMOVE      Lovable Cloud                     ← only now, nothing before this is destructive
+6. CONNECT     your own Supabase to the same project
+```
 
-Step 2: Read package.json to detect tech stack (Trap 1)
-  Lovable MCP: read_file for package.json at latest_sha
-  If name === "vite_react_shadcn_ts" -> tech_stack = "classic"
-  If name contains "tanstack_start" -> tech_stack = "modern"
-  Default fallback: "classic" (most migrations are pre-May-2026 projects)
-  Save: tech_stack
+Nothing is removed until its replacement is alive and verified. At every step
+before 5, the app still runs on Cloud, untouched. If any step fails, stop and fix -
+Cloud is the safety net until the gate is green.
 
-Step 3: Read config.toml for verify_jwt mapping (Trap 5)
-  Lovable MCP: read_file for supabase/config.toml at latest_sha
-  Parse [functions.<name>] sections to build verify_jwt map
-  Example output: { "process-payment": true, "stripe-webhook": false }
-  Default if not specified: true
-  Save: verify_jwt_map
+## SAME-PROJECT PATH (primary, 33 steps)
 
-Step 4: List all tables
+### Phase 1: Baseline + GitHub - Steps 1-4
+
+```
+Step 1: Connect GitHub (HUMAN if not already connected)
+  Editor > + menu next to chat input > GitHub > Connect.
+  Lovable creates a repo and keeps it in two-way sync.
+  The export file does NOT carry edge function code - the repo does.
+  Verify: gh repo view {user}/{repo} or Lovable MCP get_project (latest SHA).
+  Save: repo_url, latest_sha
+
+Step 2: Run the 12-count baseline inventory
   Lovable MCP: query_database
-  SELECT table_name FROM information_schema.tables
-  WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-  Save: table_list
-
-Step 5: Get columns, types, defaults, constraints
-  Lovable MCP: query_database
-  SELECT table_name, column_name, data_type, is_nullable, column_default
-  FROM information_schema.columns WHERE table_schema = 'public'
-  Save: column_definitions
-
-Step 6: Get constraints and foreign keys
-  Lovable MCP: query_database
-  SELECT tc.table_name, tc.constraint_name, tc.constraint_type,
-         kcu.column_name, ccu.table_name AS foreign_table
-  FROM information_schema.table_constraints tc
-  JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
-  LEFT JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name
-  WHERE tc.table_schema = 'public'
-  Save: constraints
-
-Step 7: Get custom enums
-  Lovable MCP: query_database
-  SELECT t.typname, e.enumlabel, e.enumsortorder
-  FROM pg_type t JOIN pg_enum e ON t.oid = e.enumtypid
-  JOIN pg_namespace n ON t.typnamespace = n.oid
-  WHERE n.nspname = 'public'
-  Save: enums
-
-Step 8: Get RLS policies
-  Lovable MCP: query_database
-  SELECT tablename, policyname, permissive, roles, cmd, qual, with_check
-  FROM pg_policies WHERE schemaname = 'public'
-  Save: rls_policies
-
-Step 9: Get custom functions with definitions (Trap 8)
-  Lovable MCP: query_database
-  SELECT p.proname AS function_name,
-         pg_get_functiondef(p.oid) AS definition
-  FROM pg_proc p
-  JOIN pg_namespace n ON p.pronamespace = n.oid
-  WHERE n.nspname = 'public'
-    AND p.proname NOT LIKE 'pg_%'
-  Save: custom_functions
-
-Step 10: Get triggers (Trap 8)
-  Lovable MCP: query_database
-  SELECT trigger_schema, trigger_name, event_object_table,
-         event_manipulation, action_timing, action_statement
-  FROM information_schema.triggers
-  WHERE trigger_schema IN ('public', 'auth')
-    AND trigger_name NOT LIKE 'pg_%'
-    AND trigger_name NOT LIKE 'RI_%'
-  Save: triggers
-
-Step 11: Get sequences with last_value (Trap 9)
-  Lovable MCP: query_database
-  SELECT sequencename, last_value, start_value, increment_by,
-         min_value, max_value, cycle
-  FROM pg_sequences WHERE schemaname = 'public'
-  Save: sequences
-
-Step 12: Get custom indexes (Trap 10)
-  Lovable MCP: query_database
-  SELECT schemaname, tablename, indexname, indexdef
-  FROM pg_indexes
-  WHERE schemaname = 'public'
-    AND indexname NOT LIKE '%_pkey'
-    AND indexname NOT LIKE '%_key'
-  Save: custom_indexes
-
-Step 13: Export auth users and identities (Trap 11)
-  Lovable MCP: query_database
-  SELECT id, email, encrypted_password, email_confirmed_at,
-         raw_user_meta_data, raw_app_meta_data, created_at
-  FROM auth.users ORDER BY created_at
-  Save: auth_users
-
-  Lovable MCP: query_database
-  SELECT id, user_id, provider, provider_id, identity_data,
-         created_at, updated_at, last_sign_in_at
-  FROM auth.identities
-  Save: auth_identities
-
-Step 14: Scan storage buckets with visibility flag (Trap 4)
-  Lovable MCP: query_database
-  SELECT id, name, public FROM storage.buckets
-  Save: storage_buckets (noting public vs private)
-
-  Lovable MCP: query_database
-  SELECT bucket_id, name, metadata->>'mimetype' AS mimetype
-  FROM storage.objects
-  Save: storage_objects
-
-Step 15: Scan text/jsonb columns for URL references (Trap 7) + run audit counts
-  Lovable MCP: query_database
-  SELECT table_name, column_name, data_type
-  FROM information_schema.columns
-  WHERE table_schema = 'public'
-    AND data_type IN ('text', 'ARRAY', 'jsonb', 'json')
-  Save: url_candidate_columns
-
-  For each candidate column, check for old ref:
-  SELECT count(*) FROM public.<table> WHERE <column>::text LIKE '%<old_ref>%'
-  Save: columns_with_old_refs
-
-  Run comprehensive audit counts:
-  WITH counts AS (
-    SELECT 'tables' AS category, COUNT(*) AS n FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'
-    UNION ALL SELECT 'enums', COUNT(*) FROM pg_type t JOIN pg_namespace n ON t.typnamespace=n.oid WHERE n.nspname='public' AND t.typtype='e'
-    UNION ALL SELECT 'rls_policies', COUNT(*) FROM pg_policies WHERE schemaname='public'
-    UNION ALL SELECT 'functions_custom', COUNT(*) FROM pg_proc p JOIN pg_namespace n ON p.pronamespace=n.oid WHERE n.nspname='public'
-    UNION ALL SELECT 'triggers', COUNT(*) FROM information_schema.triggers WHERE trigger_schema IN ('public','auth') AND trigger_name NOT LIKE 'RI_%'
-    UNION ALL SELECT 'sequences', COUNT(*) FROM pg_sequences WHERE schemaname='public'
-    UNION ALL SELECT 'indexes_custom', COUNT(*) FROM pg_indexes WHERE schemaname='public' AND indexname NOT LIKE '%_pkey' AND indexname NOT LIKE '%_key'
-    UNION ALL SELECT 'auth_users', COUNT(*) FROM auth.users
-    UNION ALL SELECT 'auth_identities', COUNT(*) FROM auth.identities
-    UNION ALL SELECT 'storage_buckets', COUNT(*) FROM storage.buckets
-    UNION ALL SELECT 'storage_objects', COUNT(*) FROM storage.objects
-  )
-  SELECT * FROM counts ORDER BY category
-  Save: source_audit_counts (used as baseline for Phase 9 comparison)
-
-Step 16: Detect database extensions (Trap 13)
-  Lovable MCP: query_database
-  SELECT extname, extversion FROM pg_extension
-  WHERE extname NOT IN ('plpgsql')
-  ORDER BY extname
-  Save: source_extensions
-
-  Common extensions in complex projects: pg_cron, pg_net, pgcrypto,
-  pg_graphql, pg_vector, pgjwt, pg_stat_statements, uuid-ossp, moddatetime.
-  ALL must be enabled in the destination before schema migration.
-
-Step 17: Detect cron jobs (Trap 14)
-  Lovable MCP: query_database
-  SELECT jobid, schedule, command, nodename, active
-  FROM cron.job
-  ORDER BY jobid
-  If this query fails with "relation cron.job does not exist", pg_cron is not
-  enabled and there are no cron jobs to migrate. Skip this step.
-  Save: cron_jobs (may be empty)
-
-Step 18: Detect vault secrets (Trap 15)
-  Lovable MCP: query_database
-  SELECT name, description, created_at, updated_at
-  FROM vault.secrets
-  If this query fails with "relation vault.secrets does not exist", vault is not
-  enabled and there are no secrets to migrate. Skip this step.
-  NEVER query the secret column - only detect names.
-  Save: vault_secret_names (may be empty)
-```
-
-Output a structured summary to the user before proceeding:
-
-```
-Source project: <name>
-Tech stack: classic | modern
-Tables: N | Enums: N | RLS policies: N
-Custom functions: N (handle_new_user: yes/no)
-Custom triggers: N
-Custom sequences: N (with last_value for each)
-Custom indexes: N
-auth.users: N | auth.identities: N
-Storage buckets: N (public: N, private: N)
-Storage files: N
-Edge functions: N (config.toml verify_jwt mapping: ...)
-Columns with URL references: N columns across M tables
-Extensions: N (list names)
-Cron jobs: N (list schedule + command for each)
-Vault secrets: N (list names only, never values)
-```
-
-If cron jobs, vault secrets, or non-standard extensions are detected, flag them:
-
-```
-⚠ Advanced components detected:
-  - Cron jobs: N jobs (these must be recreated manually in the destination)
-  - Vault secrets: N secrets (values must be re-entered in the destination dashboard)
-  - Extensions: [list any beyond pg_net] (must be enabled before schema migration)
-
-These components are detected and reported but not automatically migrated.
-The skill will remind you at the appropriate phase.
-```
-
-### Phase 2: Create Destination (Supabase) - Steps 19-23
-
-Use Supabase MCP.
-Docs: [Supabase MCP](https://supabase.com/docs/guides/getting-started/mcp) | [Pricing](https://supabase.com/pricing)
-
-```
-Step 19: List organizations
-  Supabase MCP: list_organizations - find where to create project
-  Save: organization_id
-
-Step 20: Check pricing
-  Supabase MCP: get_cost - check pricing ($10/mo on paid org, free if slot available)
-  Tell the user: "This will create a new Supabase project at $X/mo. Confirm to proceed."
-
-Step 21: Confirm cost
-  Supabase MCP: confirm_cost - get confirmation ID
-  Save: confirm_cost_id
-
-Step 22: Create project (Trap 2 - default us-west-1)
-  Supabase MCP: create_project
-    name: derive from user preference
-    organization_id: from Step 19
-    region: "us-west-1" (default - us-east-1 has had multiple capacity outages)
-    confirm_cost_id: from Step 21
-
-  If us-east-1 was specifically requested and create_project fails with capacity errors,
-  retry with us-west-1 and inform the user.
-  Save: new_project_ref, new_project_id
-
-Step 23: Wait for project to be ready
-  Supabase MCP: get_project - wait for status = ACTIVE_HEALTHY
-  May take 30-90 seconds. Poll every 15 seconds.
-  Save: new_anon_key, new_service_role_key
-```
-
-### Phase 3: Apply Schema - Steps 24-32
-
-Use Supabase MCP `apply_migration`.
-Order is critical: extensions -> enums -> tables -> sequences with setval -> functions -> triggers -> indexes -> RLS.
-
-```
-Step 24: Enable all detected extensions (Trap 3, Trap 13)
-  Supabase MCP: apply_migration
-  For each extension from source_extensions (Step 16):
-  CREATE EXTENSION IF NOT EXISTS <extname> WITH SCHEMA extensions;
-
-  pg_net is required for storage migration and is not enabled by default.
-  pg_cron is required if cron jobs were detected in Step 17.
-  Always enable pg_net even if not in source list (needed for Phase 6).
-  Expected output: all source extensions enabled in destination
-
-Step 25: Create all custom enums
-  Supabase MCP: apply_migration
-  CREATE TYPE public.<enum_name> AS ENUM ('value1', 'value2', ...);
-  One CREATE TYPE per enum from Step 7.
-  Expected output: types created matching source enum count
-
-Step 26: Create all tables with columns, defaults, constraints, foreign keys
-  Supabase MCP: apply_migration
-  ORDER MATTERS: tables referenced by FKs must be created first.
-  Typical order: profiles -> categories -> products -> orders -> junction tables
-  Include column types, NOT NULL constraints, DEFAULT values, PRIMARY KEYs, UNIQUE constraints, and FOREIGN KEYs.
-  Expected output: all tables created matching source table count
-
-Step 27: Create custom sequences with correct last_value (Trap 9)
-  Supabase MCP: apply_migration
-  For each sequence from Step 11:
-  CREATE SEQUENCE public.<sequence_name>
-    START WITH <start_value>
-    INCREMENT BY <increment_by>
-    MINVALUE <min_value>
-    MAXVALUE <max_value>
-    <CYCLE | NO CYCLE>;
-  SELECT setval('public.<sequence_name>', <last_value>, true);
-
-  The "true" argument means the next nextval() returns last_value + 1.
-  Expected output: sequences created with correct last_value
-
-Step 28: Create custom functions (Trap 8)
-  Supabase MCP: apply_migration
-  Use the exact pg_get_functiondef output from Step 9.
-  This includes critical functions like handle_new_user.
-  Expected output: functions created matching source function count
-
-  WARNING: If handle_new_user or similar auth trigger functions are missing,
-  new user signups will succeed but the user gets no profile row.
-
-Step 29: Create triggers (Trap 8)
-  Supabase MCP: apply_migration
-  For each trigger from Step 10:
-  CREATE TRIGGER <trigger_name>
-    <action_timing> <event_manipulation>
-    ON <event_object_table>
-    FOR EACH ROW
-    EXECUTE FUNCTION <function_name>();
-  Expected output: triggers created matching source trigger count
-
-Step 30: Create custom indexes (Trap 10)
-  Supabase MCP: apply_migration
-  Run each indexdef directly from Step 12 (it is a complete CREATE INDEX statement).
-  Example: CREATE INDEX idx_products_slug ON public.products USING btree (slug);
-  Expected output: indexes created matching source custom index count
-
-Step 31: Enable RLS and create all policies
-  Supabase MCP: apply_migration
-  ALTER TABLE public.<table> ENABLE ROW LEVEL SECURITY;
-  CREATE POLICY "<name>" ON public.<table> FOR <cmd>
-    TO <roles>
-    USING (<qual>)
-    WITH CHECK (<with_check>);
-  Expected output: RLS policies created matching source policy count
-
-Step 32: Verify schema migration
-  Supabase MCP: execute_sql
-  SELECT
-    (SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE') AS tables,
-    (SELECT count(*) FROM pg_type t JOIN pg_namespace n ON t.typnamespace=n.oid WHERE n.nspname='public' AND t.typtype='e') AS enums,
-    (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON p.pronamespace=n.oid WHERE n.nspname='public') AS functions,
-    (SELECT count(*) FROM information_schema.triggers WHERE trigger_schema IN ('public','auth') AND trigger_name NOT LIKE 'RI_%') AS triggers,
-    (SELECT count(*) FROM pg_sequences WHERE schemaname='public') AS sequences;
-
-  Compare each count against source_audit_counts from Step 15.
-  If any mismatch, stop and fix before proceeding.
-```
-
-### Phase 4: Auth Users and Identities (BEFORE data) - Steps 33-36
-
-Use Supabase MCP `execute_sql`.
-Docs: [Supabase Auth](https://supabase.com/docs/guides/auth) | [Admin API](https://supabase.com/docs/reference/javascript/admin-api)
-
-```
-Step 33: Insert auth.users with ORIGINAL encrypted_password hashes
-  Supabase MCP: execute_sql
-  INSERT INTO auth.users (
-    id, instance_id, email, encrypted_password,
-    email_confirmed_at, raw_user_meta_data, raw_app_meta_data,
-    created_at, updated_at, role, aud
-  ) VALUES (
-    '{id}', '00000000-0000-0000-0000-000000000000',
-    '{email}', '{original_encrypted_password}',  -- EXACT bcrypt hash ($2a$10$...)
-    '{email_confirmed_at}', '{metadata}'::jsonb, '{app_metadata}'::jsonb,
-    '{created_at}', now(), 'authenticated', 'authenticated'
-  );
-
-  NEVER generate temporary passwords. ALWAYS copy the original bcrypt hash.
-  Expected output: auth.users count matches source
-
-Step 34: Insert auth.identities (Trap 11)
-  Supabase MCP: execute_sql
-  INSERT INTO auth.identities (
-    id, user_id, provider, provider_id, identity_data,
-    created_at, updated_at, last_sign_in_at
-  ) VALUES (
-    '{id}', '{user_id}', '{provider}', '{provider_id}',
-    '{identity_data}'::jsonb,
-    '{created_at}', '{updated_at}', '{last_sign_in_at}'
-  );
-
-  Without identities, login partially works but session recovery breaks.
-  Password recovery flows fail. OAuth users cannot re-link accounts.
-  Expected output: auth.identities count matches source
-
-Step 35: Verify auth migration
-  Supabase MCP: execute_sql
-  SELECT
-    (SELECT count(*) FROM auth.users) AS users,
-    (SELECT count(*) FROM auth.identities) AS identities;
-  Compare against source counts from Step 13 (auth scan).
-
-Step 36: Optional - preserve JWT secret
-  If the user wants existing sessions to remain valid (no forced re-login):
-  1. In source dashboard: Settings -> API -> JWT Secret -> copy
-  2. In destination dashboard: Settings -> API -> JWT Secret -> paste
-  This MUST be done via the dashboard - there is no API for it.
-  Mention this only if relevant to the user's use case.
-```
-
-### Phase 5: Insert Data + URL Rewriting - Steps 37-41
-
-Use Supabase MCP `execute_sql`.
-
-```
-Step 37: Insert catalog/reference tables first (no user FKs)
-  Supabase MCP: execute_sql
-  For each source table with no FK to auth.users or profiles:
-  SELECT row_to_json(t) FROM (SELECT * FROM public.<table>) t
-  Then generate INSERT statements and execute on destination.
-  Batch in groups of 100 rows for large tables.
-  Expected output: row counts match source for each table
-
-Step 38: Insert user-owned tables
-  Supabase MCP: execute_sql
-  profiles, categories, orders, etc.
-  profiles.id references auth.users.id - since we inserted auth.users
-  in Phase 4, the FK is satisfied naturally. No need to drop constraints.
-  Expected output: row counts match source for each table
-
-Step 39: Insert junction/relation tables
-  Supabase MCP: execute_sql
-  order_items, project_members, bookings, etc.
-  These depend on both catalog and user-owned tables already existing.
-  Expected output: row counts match source for each table
-
-Step 40: Rewrite URLs in ALL text/jsonb columns (Trap 7)
-  Using the columns_with_old_refs from Step 15, for each column:
-
-  For text columns:
-  Supabase MCP: execute_sql
-  UPDATE public.<table>
-  SET <column> = REPLACE(<column>, '<old_ref>', '<new_ref>')
-  WHERE <column> LIKE '%<old_ref>%';
-
-  For jsonb columns (cast technique):
-  Supabase MCP: execute_sql
-  UPDATE public.<table>
-  SET <column> = REPLACE(<column>::text, '<old_ref>', '<new_ref>')::jsonb
-  WHERE <column>::text LIKE '%<old_ref>%';
-
-  Do NOT only check columns named *_url or *_image.
-  URLs hide in metadata, config, specs, and arbitrary JSONB fields.
-  Expected output: 0 rows remaining with old ref in any text/jsonb column
-
-Step 41: Verify data migration
-  Supabase MCP: execute_sql
-  For each table:
-  SELECT '<table>' AS t, count(*) AS n FROM public.<table>
-  Compare against row counts captured during Phase 1.
-  Also verify no old refs remain:
-  SELECT count(*) FROM public.<table> WHERE <column>::text LIKE '%<old_ref>%'
-  Expected output: all counts match, zero old ref hits
-```
-
-### Phase 6: Storage - Steps 42-49
-
-Use Supabase MCP `execute_sql` + `deploy_edge_function`.
-Docs: [Supabase Storage](https://supabase.com/docs/guides/storage) | [Creating buckets](https://supabase.com/docs/guides/storage/buckets/creating-buckets)
-
-```
-Step 42: Create storage buckets with correct visibility (Trap 4)
-  Supabase MCP: execute_sql
-  For each bucket from Step 14:
-  INSERT INTO storage.buckets (id, name, public) VALUES ('<id>', '<name>', <public_bool>);
-  Expected output: bucket count matches source
-
-Step 43: Create storage RLS policies
-  Supabase MCP: apply_migration
-  Recreate matching storage.objects RLS policies from source.
-  Expected output: storage policies applied
-
-Step 44: Deploy migrate-storage edge function
-  Supabase MCP: deploy_edge_function
-  name: migrate-storage
-  verify_jwt: false
-  files: [{ name: "index.ts", content: <see references/migrate-storage-function.md> }]
-  Expected output: function deployed successfully
-
-Step 45: Generate migration payload for public buckets
-  For each public bucket, build the file list:
-  Lovable MCP: query_database
-  SELECT jsonb_build_object(
-    'files', jsonb_agg(
-      jsonb_build_object(
-        'source_url', 'https://<source_ref>.supabase.co/storage/v1/object/public/' || bucket_id || '/' || name,
-        'bucket', bucket_id,
-        'path', name,
-        'content_type', metadata->>'mimetype'
-      )
-    )
-  ) AS payload
-  FROM storage.objects
-  WHERE bucket_id = '<public_bucket_id>'
-  Save: public_payload
-
-Step 46: Generate migration payload for private buckets (Trap 4)
-  For each private bucket, generate signed URLs from source:
-  Lovable MCP: query_database
-  SELECT storage.create_signed_url('<bucket_id>', name, 3600) AS signed_url,
-         bucket_id, name, metadata->>'mimetype' AS mimetype
-  FROM storage.objects
-  WHERE bucket_id = '<private_bucket_id>'
-
-  Build payload using signed_url as source_url instead of public URL.
-  The signed URL has a 1-hour TTL - complete the migration within that window.
-  Save: private_payload
-
-Step 47: Invoke migrate-storage via pg_net (Trap 3 - pg_net enabled in Step 24)
-  Supabase MCP: execute_sql (on destination)
-  SELECT net.http_post(
-    url := 'https://<dest_ref>.supabase.co/functions/v1/migrate-storage',
-    headers := '{"Content-Type": "application/json"}'::jsonb,
-    body := '<payload>'::jsonb
-  ) AS request_id;
-  Save: request_id
-
-  For large buckets (>50 files): split into chunks of 25 files each.
-  Loop the pg_net calls with different request IDs.
-
-Step 48: Verify storage migration
-  Supabase MCP: execute_sql
-  Wait 5-30 seconds depending on file count, then check:
-  SELECT id, status_code, content::jsonb, error_msg, created
-  FROM net._http_response
-  WHERE id = <request_id>;
-  Expected output: status_code = 200, all files ok: true
-
-  Also verify object count:
-  SELECT count(*) FROM storage.objects;
-  Compare against source storage_objects count from Step 14.
-
-Step 49: Delete temporary migrate-storage edge function
-  The user must delete it via the Supabase dashboard:
-  Settings -> Edge Functions -> migrate-storage -> Delete
-  (Supabase MCP does not have a delete_edge_function tool)
-  Tell the user to do this after confirming storage migration succeeded.
-```
-
-### Phase 7: Edge Functions - Steps 50-54
-
-Use Supabase MCP `deploy_edge_function` or Supabase CLI.
-Docs: [Edge Functions](https://supabase.com/docs/guides/functions) | [Deploy](https://supabase.com/docs/guides/functions/deploy)
-
-```
-Step 50: List all edge functions and detect shared code (Trap 16)
-  Lovable MCP: read_file for supabase/functions/ directory listing at latest_sha
-  Or scan the GitHub repo: supabase/functions/{name}/index.ts
-  Save: edge_function_names
-
-  Check for shared code directory:
-  Lovable MCP: read_file at path supabase/functions/_shared/
-  If it exists, read ALL files in _shared/ recursively.
-  Common patterns: _shared/cors.ts, _shared/supabase-client.ts, _shared/utils.ts
-  Save: shared_function_files (may be empty)
-
-  If shared code exists and there are more than 10 edge functions,
-  recommend Supabase CLI deployment (Step 52 Option B) instead of
-  MCP one-by-one deployment. CLI handles shared imports automatically.
-
-Step 51: Read each function source and detect secrets (Trap 6)
-  For each edge function:
-  Lovable MCP: read_file at path supabase/functions/<name>/index.ts
-
-  Also check for multi-file functions:
-  Some functions have additional files beyond index.ts (e.g., types.ts, helpers.ts).
-  Lovable MCP: read_file for supabase/functions/<name>/ directory listing
-  Read ALL files in each function directory, not just index.ts.
-
-  Grep for secrets the function uses:
-  Look for Deno.env.get("<SECRET_NAME>") calls across ALL function files.
-  Track which secrets are needed, excluding auto-provided ones:
-    - SUPABASE_URL (auto)
-    - SUPABASE_ANON_KEY (auto)
-    - SUPABASE_SERVICE_ROLE_KEY (auto)
-    - SUPABASE_DB_URL (auto)
-
-  Grep for shared imports:
-  Look for imports from "../_shared/" or "../../_shared/" patterns.
-  If found and shared_function_files is empty, STOP - shared code was missed in Step 50.
-
-  Save: function_sources (ALL files per function), secrets_per_function, shared_imports
-
-Step 52: Deploy each function with correct verify_jwt (Trap 5, Trap 16)
-  If shared_function_files is NOT empty or function count > 15:
-    STRONGLY RECOMMEND Option B (Supabase CLI) - it handles shared code
-    and deploys all functions in one command. MCP deploy_edge_function
-    does not support shared imports between functions.
-
-  Option A (MCP - only if NO shared code):
-  Supabase MCP: deploy_edge_function
-  For each function:
-    name: same as source
-    files: include ALL files from function directory (not just index.ts)
-    verify_jwt: from verify_jwt_map (Step 3), default true if not specified
-
-  Option B (CLI - recommended for shared code or many functions):
-  The source repo should already be cloned from Phase 8 Step 56.
-  cd /tmp/source && supabase functions deploy --all --project-ref <dest_ref>
-  This deploys all functions including _shared/ imports in one command.
-
-  Webhooks (Stripe, OAuth callbacks) typically need verify_jwt: false.
-  User-facing functions typically need verify_jwt: true.
-  Expected output: each function deployed successfully
-
-Step 53: Generate secrets inventory for the user (Trap 6)
-  After all functions are deployed, compile the list of secrets:
-  Present per-function breakdown:
-    process-payment: requires STRIPE_SECRET_KEY
-    send-notification: requires RESEND_API_KEY
-    generate-report: requires OPENAI_API_KEY
-
-  Tell the user:
-  "Set these in: Supabase Dashboard -> Settings -> Edge Functions -> Secrets.
-   The functions will fail until these are set."
-
-Step 54: Verify edge function deployment
-  Supabase MCP: list_edge_functions
-  Compare count against edge_function_names from Step 50.
-  Expected output: function count matches source
-```
-
-### Phase 8: Frontend Code - Steps 55-61
-
-**REQUIRES HUMAN ASSISTANCE** at Steps 58 and 59.
-Docs: [Lovable GitHub integration](https://docs.lovable.dev/integrations/github)
-
-```
-Step 55: Find the original project's GitHub repo
-  gh repo list {username} --json name,url
-  Look for the repo that matches the original Lovable project.
-  Save: original_repo_url
-
-Step 56: Clone the original repo locally
-  git clone https://github.com/{user}/{original-repo}.git /tmp/source
-  Expected output: repo cloned successfully
-
-Step 57: Create new Lovable project (Trap 1 - pass correct tech_stack)
-  Lovable MCP: create_project
-    description: "Migration target for <source_name>"
-    workspace_id: same workspace
-    tech_stack: from Step 2 detection (usually "classic" for pre-May-2026 projects)
-    visibility: private
-    NO initial_message - we want it as empty as possible
-
-  WARNING: If tech_stack does not match the source, Lovable cannot build the pushed code.
-  A "classic" source pushed to a "modern" scaffold will fail.
-  A "modern" source pushed to a "classic" scaffold will fail.
-  Save: new_lovable_project_id
-
->>> HUMAN STEP 58: Connect Supabase in Lovable dashboard
-    Open the project > Supabase > Connect > Select the new Supabase project
-    (Lovable MCP add_connector only returns a URL, user must click through)
-
->>> HUMAN STEP 59: Connect GitHub in Lovable dashboard
-    Open the project > GitHub > Connect > Creates a new repo
-    (No GitHub connector in MCP catalog)
-    Save: new_github_repo
-
-Step 60: Copy code from original to new repo
-  git clone https://github.com/{user}/{new-repo}.git /tmp/new-repo
-  rsync -av --exclude='.git' --exclude='.env' --exclude='bun.lockb' --exclude='package-lock.json' /tmp/source/ /tmp/new-repo/
-  git add -A && git commit -m "Migrate from Lovable Cloud to Supabase" && git push
-
-  Note: This works with private repos as long as the user has gh auth login configured.
-  If push fails due to auth issues, the user can temporarily make the repo public:
-    gh repo edit {user}/{new-repo} --visibility public --accept-visibility-change-consequences
-  And set it back to private after the push:
-    gh repo edit {user}/{new-repo} --visibility private --accept-visibility-change-consequences
-  Expected output: code pushed, Lovable picks it up automatically
-
-Step 61: Tell Lovable to rebuild
-  Lovable MCP: send_message
-  project_id: new_lovable_project_id
-  message: "The codebase has been updated via GitHub. Please rebuild the app against the connected Supabase database. Do not modify any files."
-  Expected output: Lovable rebuilds with the new Supabase connection
-```
-
-### Phase 9: Verify - Steps 62-68
-
-```
-Step 62: Check env variables
-  Lovable auto-configures SUPABASE_URL and SUPABASE_ANON_KEY when Supabase is connected.
-  Verify these point to the NEW project, not the old Lovable Cloud instance.
-
-Step 63: Run comprehensive audit query on destination (Trap 12)
-  Supabase MCP: execute_sql
   WITH counts AS (
     SELECT 'tables' AS category, COUNT(*) AS n FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'
     UNION ALL SELECT 'enums', COUNT(*) FROM pg_type t JOIN pg_namespace n ON t.typnamespace=n.oid WHERE n.nspname='public' AND t.typtype='e'
@@ -785,181 +187,385 @@ Step 63: Run comprehensive audit query on destination (Trap 12)
     UNION ALL SELECT 'auth_identities', COUNT(*) FROM auth.identities
     UNION ALL SELECT 'storage_buckets', COUNT(*) FROM storage.buckets
     UNION ALL SELECT 'storage_objects', COUNT(*) FROM storage.objects
-    UNION ALL SELECT 'pg_net_enabled', CASE WHEN EXISTS(SELECT 1 FROM pg_extension WHERE extname='pg_net') THEN 1 ELSE 0 END
   )
   SELECT * FROM counts ORDER BY category
-  Save: destination_audit_counts
+  Also capture: per-table row counts, extensions (pg_extension), cron jobs
+  (SELECT jobid, jobname, schedule, command FROM cron.job), vault secret NAMES
+  only, Cloud secret NAMES (Cloud tab > Secrets).
+  Save: baseline (this is the Phase 7 gate checklist)
 
-Step 64: Scan for old Supabase ref leaks (Trap 7)
-  For each text/jsonb column identified in Step 15:
-  Supabase MCP: execute_sql
-  SELECT count(*) FROM public.<table> WHERE <column>::text LIKE '%<old_ref>%'
-  Expected output: 0 for every column
+  No MCP? The Cloud panel shows the same numbers: Database, Users, Storage,
+  Functions, Secrets, Jobs. Write them down by hand.
 
-Step 65: Build comparison table (Trap 12 - compare all 12 categories)
-  Present to the user:
-  Category           Source  Destination  Status
-  -----------------  ------  -----------  --------
-  tables             N       N            OK
-  enums              N       N            OK
-  rls_policies       N       N            OK
-  functions_custom   N       N            OK or MISSING
-  triggers           N       N            OK or MISSING
-  sequences          N       N            OK or MISSING
-  indexes_custom     N       N            OK or MISSING
-  auth_users         N       N            OK
-  auth_identities    N       N            OK or MISSING
-  storage_buckets    N       N            OK
-  storage_objects    N       N            OK or PARTIAL
-  pg_net_enabled     1       1            OK
-  old_ref_leaks      0       0            OK
+Step 3: Map edge functions and verify_jwt
+  Read supabase/config.toml from the repo at latest_sha.
+  Parse [functions.<name>] sections -> verify_jwt map (default true).
+  List supabase/functions/ directories, note _shared/ if present.
+  Grep all function files for Deno.env.get("...") -> secrets inventory,
+  excluding auto-provided SUPABASE_URL / SUPABASE_ANON_KEY /
+  SUPABASE_SERVICE_ROLE_KEY / SUPABASE_DB_URL.
+  Save: verify_jwt_map, function_names, secrets_per_function
 
-  If any row shows MISSING or PARTIAL, point to the specific phase:
-    functions_custom MISSING -> re-run Phase 3 Step 28
-    triggers MISSING -> re-run Phase 3 Step 29
-    sequences MISSING -> re-run Phase 3 Step 27
-    indexes_custom MISSING -> re-run Phase 3 Step 30
-    auth_identities MISSING -> re-run Phase 4 Step 34
-    storage_objects PARTIAL -> re-run Phase 6 Steps 45-48
-    old_ref_leaks > 0 -> re-run Phase 5 Step 40
-
-Step 66: Visual check
-  Lovable MCP: get_project screenshot of new project
-  Compare against original - should match in layout and content.
-  Check that images load (storage URLs rewritten correctly).
-
-Step 67: Test login with original credentials
-  Use one of the migrated user emails + original password.
-  If login fails, check:
-    - encrypted_password was copied correctly (not regenerated)
-    - auth.identities were migrated (Step 31)
-    - email_confirmed_at is set (not null)
-
-Step 68: Final sign-off
-  Tell the user:
-  1. The new Supabase project is ready: <dest_ref>
-  2. Remind them to set edge function secrets (from Step 53)
-  3. Tell them to delete the migrate-storage edge function (from Step 49) if not already done
-  4. Lovable Cloud cannot be "disabled" - once activated, it remains attached.
-     The user switches the Supabase connection in Lovable dashboard to point at the new project.
-  5. Optional: preserve JWT secret (from Step 36) if they want existing sessions to survive
-  6. If cron jobs were detected (Step 17): remind the user to recreate them in the destination
-     Supabase Dashboard -> Database -> Cron Jobs, or via SQL:
-     SELECT cron.schedule('job_name', 'schedule', $$command$$);
-     The commands likely reference the OLD project URL - update them to the new one.
-  7. If vault secrets were detected (Step 18): remind the user to re-enter values in the destination
-     Supabase Dashboard -> Settings -> Vault
-     Secret names were logged but values were never read - the user must provide them.
-  8. If external workers were mentioned: remind the user to update any external services
-     (Fly.io, Railway, Cloudflare Workers, etc.) that point to the old Supabase project URL.
+Step 4: Present the baseline to the user
+  Show the 12 counts + functions + secrets + cron jobs as a table.
+  This exact table gets re-checked at the gate (Step 26).
 ```
 
-## Human Assistance Points
+### Phase 2: Export + Download - Steps 5-8
 
-| Step | What user must do | Why it cannot be automated |
-|---|---|---|
-| 58 | Connect Supabase in Lovable dashboard | Lovable MCP add_connector only returns a URL |
-| 59 | Connect GitHub in Lovable dashboard | No GitHub connector in MCP catalog |
-| 49 | Delete migrate-storage edge function | No delete_edge_function in MCP |
-| 53 | Set edge function secrets in dashboard | No MCP tool for setting secrets |
-| 68 | Recreate cron jobs in destination | Commands reference project-specific URLs |
-| 68 | Re-enter vault secret values in destination | Values are never read during scan |
-| 68 | Re-point external workers to new project URL | External services are outside Supabase |
-| Cost | Confirm Supabase project cost | MCP requires explicit cost confirmation |
+```
+Step 5: Trigger the export (HUMAN)
+  Cloud tab > Overview > Advanced settings > Export project data > Export data.
 
-## Integrated Traps Reference
+Step 6: Find the export (don't wait for the email)
+  The email/toast is unreliable. After ~1 minute, check Cloud tab > Storage for
+  a new bucket named database_export_DD_MM_YY with a .zip inside.
+  Or via Lovable MCP: query_database
+  SELECT bucket_id, name FROM storage.objects WHERE bucket_id LIKE 'database_export%';
 
-All 16 traps are integrated as explicit steps in their respective phases. This table maps each trap to its prevention step:
+Step 7: Download and verify the export (HUMAN downloads, agent verifies)
+  Download the .zip, unzip it -> a .backup file.
+  Verify readability and take stock:
+  pg_restore --list your-export.backup | head -50
+  pg_restore --list your-export.backup | grep -c "TABLE DATA"
+  If pg_restore errors on zstd here, fix the tooling NOW (Step 13) before
+  going further.
+  Save: backup_path, toc_summary
 
-| Trap | Severity | Description | Prevention step |
+Step 8: Download the storage files
+  Files always travel: Cloud storage -> local machine -> new Supabase storage.
+  One local folder per bucket, same names, keep subfolder structure.
+  SKIP the database_export_* bucket (already downloaded, must not move over).
+  Few files: Cloud tab > Storage > per-file menu > Download.
+  Many files: script it - public buckets via public URLs from storage.objects,
+  private buckets via signed URLs (see references/migrate-storage-function.md).
+  Verify: local file count == baseline storage_objects (minus export bucket).
+```
+
+### Phase 3: Create the Destination - Steps 9-12
+
+```
+Step 9: Organization + cost
+  Supabase MCP: list_organizations -> organization_id
+  Supabase MCP: get_cost -> tell the user the price -> confirm_cost -> id
+
+Step 10: Create the project
+  Supabase MCP: create_project (region: us-west-1 default; us-east-1 has had
+  capacity outages - retry on us-west-1 if creation fails).
+  Save: new_ref. Generate a strong DB password, save it somewhere safe.
+
+Step 11: Wait for ACTIVE_HEALTHY
+  Supabase MCP: get_project, poll every 15s (30-90s typical).
+  Save: anon_key (get_publishable_keys).
+
+Step 12: Build the connection string
+  Use the SESSION POOLER string (Dashboard > Connect), port 5432:
+  postgresql://postgres.[new_ref]:[password]@[pooler-host]:5432/postgres
+  - Special characters in the password must be percent-encoded (! -> %21).
+  - "Direct connection" is IPv6-only, which many home networks can't reach.
+    The session pooler exists exactly for this.
+  Save: conn_string
+```
+
+### Phase 4: Restore - Steps 13-16
+
+```
+Step 13: Verify pg_restore can read zstd (Trap 18)
+  pg_restore --version   (need 16+, BUILT WITH zstd)
+  Test against the real file: pg_restore --list <backup_path> > /dev/null
+  If "unsupported compression method" or zstd errors on macOS:
+    brew install postgresql@18
+    use /opt/homebrew/opt/postgresql@18/bin/pg_restore explicitly
+  (The brew libpq keg does NOT ship zstd support. Version number alone lies.)
+
+Step 14: Restore
+  pg_restore --no-owner --no-privileges -d "<conn_string>" <backup_path>
+  EXPECTED: a wall of errors (hundreds is normal - the verified test run printed 290).
+  The new project already has managed auth/storage/cron/vault foundations; the
+  backup tries to recreate them and gets "already exists" / "permission denied".
+  Data lands fine around them. Capture stderr to a log anyway:
+  pg_restore ... 2> restore-errors.log
+
+Step 15: Fix auth.identities (Trap 19 - FK ordering)
+  Supabase MCP: execute_sql
+  SELECT (SELECT count(*) FROM auth.users) AS users,
+         (SELECT count(*) FROM auth.identities) AS identities;
+  If identities < users (the restore loads identities before users and the FK
+  rejects them):
+  pg_restore --data-only -n auth -t identities -d "<conn_string>" <backup_path>
+  Re-run the count. users == identities == baseline, or stop.
+
+Step 16: Snapshot awareness (Trap 26)
+  The restore reflects the database AT EXPORT TIME. Any data changed on Cloud
+  after the export (including auth metadata cleanups) is NOT in the file.
+  If the app kept running after the export, either re-export fresh or re-apply
+  the deltas. Ask the user when the export was taken vs when writes stopped.
+```
+
+### Phase 5: Post-Restore Fixups - Steps 17-21
+
+```
+Step 17: Recreate cron jobs + hunt zombies (Trap 20)
+  cron.job rows are IN the backup but the restore cannot write them
+  ("permission denied for table job" - the cron schema is protected).
+  Enable pg_cron (Dashboard > Database > Extensions), then per job from baseline:
+  SELECT cron.schedule('<jobname>', '<schedule>', $$<command>$$);
+
+  THEN hunt zombies - any job whose command calls a URL still points at the
+  OLD project:
+  SELECT jobid, jobname, command FROM cron.job WHERE command LIKE '%supabase.co%';
+  For each hit with the old ref:
+  SELECT cron.alter_job(<jobid>, command := $$<command with new_ref>$$);
+  Verify: SELECT count(*) FROM cron.job WHERE command LIKE '%<old_ref>%';  -- 0
+
+Step 18: Clear storage ghost rows (Trap 21)
+  The restore brought storage.buckets AND storage.objects METADATA - rows that
+  point to files that don't exist yet, plus the database_export_* bucket rows.
+  Ghost rows make uploads fail with "resource already exists" and make the
+  export bucket reappear in the new project.
+  DO NOT delete them with SQL - a protect_delete trigger (and storage
+  consistency) blocks/undermines it. Use the Storage API or CLI:
+  - Per object: DELETE via storage API (supabase storage rm, or the JS client
+    storage.from(bucket).remove([paths]), or dashboard multi-select > Delete)
+  - Drop the database_export_* bucket entirely (dashboard: Delete bucket).
+  Buckets themselves stay (they're real and correctly configured by the restore).
+  Verify: SELECT count(*) FROM storage.objects;  -- 0 before uploads
+
+Step 19: Upload the storage files
+  Dashboard > Storage > per bucket > Upload (keep folder structure), or CLI:
+  supabase storage cp --recursive ./local-bucket-folder ss:///bucket-name -p <ref>
+  Verify: SELECT bucket_id, count(*) FROM storage.objects GROUP BY bucket_id;
+  matches baseline per bucket. Open one image in the browser.
+
+Step 20: Rewrite old URLs in data (Trap 22 for signed URLs)
+  Find every text/jsonb column that might hold URLs:
+  SELECT table_name, column_name FROM information_schema.columns
+  WHERE table_schema='public' AND data_type IN ('text','jsonb','json','ARRAY');
+  For each, count LIKE '%<old_ref>%', then rewrite:
+  text:  UPDATE t SET c = REPLACE(c, '<old_ref>', '<new_ref>') WHERE c LIKE '%<old_ref>%';
+  jsonb: UPDATE t SET c = REPLACE(c::text, '<old_ref>', '<new_ref>')::jsonb WHERE c::text LIKE '%<old_ref>%';
+  EXCEPTION - signed URLs (contain '?token='): they are cryptographically tied
+  to the OLD project and die with it. Text-replacing them produces broken links
+  that LOOK right. NULL them or regenerate fresh signed URLs from the new
+  project; most apps regenerate on render.
+  Verify: 0 rows LIKE old_ref anywhere.
+
+Step 21: Verify sequences
+  SELECT sequencename, last_value FROM pg_sequences WHERE schemaname='public';
+  The custom-format dump carries SEQUENCE SET entries, so values should already
+  match the source baseline. If any sequence reads 1 with existing rows, fix:
+  SELECT setval('public.<seq>', <source_last_value>, true);
+```
+
+### Phase 6: Edge Functions + Secrets - Steps 22-25
+
+```
+Step 22: Deploy edge functions (pick one)
+  A. Supabase CLI from the repo clone (handles _shared/ and config.toml):
+     supabase functions deploy --project-ref <new_ref> --workdir <repo_path>
+  B. Supabase MCP deploy_edge_function per function (only if no _shared/),
+     passing verify_jwt from the Step 3 map.
+  C. Defer to the Lovable agent AFTER Connect (Step 32) - it CAN deploy to the
+     connected Supabase (verified). Trade-off: functions come online a few
+     minutes after the switch instead of before it.
+  Verify (A/B): Supabase MCP list_edge_functions == function_names count.
+
+Step 23: Secrets (HUMAN - the agent cannot do this)
+  Neither the Lovable agent nor any MCP can set edge function secrets.
+  User enters them: Supabase Dashboard > Edge Functions > Secrets.
+  - Names from the Step 3 inventory, EXACT capitalization.
+  - Recommend FRESH keys from each provider (Stripe, Resend...) over hunting
+    old values - same effort, free security hygiene.
+  - Never copy SUPABASE_* keys - the new project auto-provides them.
+  - VAULT secrets too: their rows rode in with the restore but the values are
+    encrypted with the OLD project's key and unrecoverable. Re-enter each value
+    from the baseline names list: Dashboard > Settings > Vault.
+
+Step 24: Re-wire Lovable AI features (Trap 25)
+  LOVABLE_API_KEY survives Cloud removal (workspace secret), but own-Supabase
+  edge functions can't read Lovable's secret store. Two supported paths:
+  A. RECOMMENDED: move AI calls into Lovable server functions (createServerFn)
+     where the key is auto-injected - ask the Lovable agent to do it.
+  B. Copy LOVABLE_API_KEY into the new project's edge function secrets.
+
+Step 25: Delete temp helpers EVERYWHERE (Trap 24)
+  Any temporary function deployed during migration (exporters, helpers) must be
+  deleted BOTH from Supabase (dashboard) AND from supabase/functions/ in the
+  repo. GitHub sync is two-way: if it stays in the repo, it comes back.
+```
+
+### Phase 7: THE GATE - Steps 26-28
+
+```
+Step 26: Re-run the 12-count audit on the DESTINATION
+  Same query as Step 2, via Supabase MCP execute_sql.
+  Build the comparison table:
+  Category           Baseline  Destination  Status
+  tables             N         N            OK / MISMATCH
+  ... (all 12 rows) ...
+  Plus: per-table row counts, cron job count, edge function count,
+  extensions list vs baseline (SELECT extname FROM pg_extension),
+  vault secret names re-entered, old_ref_leaks = 0.
+
+Step 27: Functional checks
+  - Log in with a REAL migrated user and their ORIGINAL password.
+  - Open a real storage image in the browser.
+  - Invoke one edge function (or accept deferred deploy, path C).
+
+Step 28: GATE DECISION
+  ALL GREEN -> proceed to Phase 8.
+  ANY RED   -> STOP. Fix and re-verify. Cloud is still alive and untouched;
+  nothing has been lost. Do NOT remove Cloud with a red gate.
+  Point each mismatch at its fix:
+    identities -> Step 15 | cron -> Step 17 | storage counts -> Steps 18-19
+    old refs -> Step 20 | sequences -> Step 21 | functions -> Step 22
+```
+
+### Phase 8: Remove + Connect - Steps 29-33
+
+```
+Step 29: Remove Lovable Cloud (HUMAN)
+  Cloud tab > Overview > Advanced settings > Remove Lovable Cloud.
+  Two checkboxes + type the project name. This deletes the Cloud instance
+  INCLUDING its storage (and any un-downloaded exports).
+  There is no rush - some users sit at the green gate for days. That's fine.
+
+Step 30: Connect the own Supabase (HUMAN)
+  The Cloud tab transforms. At the bottom: "Already have a Supabase project?
+  Connect it here." > authorize the Supabase org > pick the new project > Connect.
+  Lovable auto-rewrites .env with the new URL + key (visible in GitHub history).
+
+Step 31: Fix the integration overwrite (Trap 23)
+  The integration may also refresh src/integrations/supabase/client.ts (or
+  equivalent) with a template. On modern (TanStack/SSR) stacks this can break
+  the build/preview - an error page right after connecting is THIS, not data loss.
+  Send the Lovable agent:
+
+    Review my Supabase connection: confirm the app points to my new Supabase
+    project, check that auth, database queries, storage and edge functions all
+    work against it, and list anything still referencing the old backend.
+
+    Important context: the database, users, storage files and edge functions
+    ALREADY EXIST in the new project, they were migrated. Do NOT create tables,
+    run migrations, re-seed data, or rewrite files beyond the connection wiring.
+    Fix wiring only.
+
+  The Do NOTs matter: the agent is eager and a bare "fix my connection" can
+  trigger re-migrations or file rewrites.
+
+Step 32: Deferred function deploy (only if path C in Step 22)
+  Send the Lovable agent:
+    Deploy all edge functions from supabase/functions to the connected Supabase
+    project, keeping the verify_jwt settings from supabase/config.toml.
+    Don't modify their code.
+
+Step 33: Final tidy
+  - Rotate the DB password if it touched any chat/script/AI session.
+  - Recreate OAuth providers (Google etc.): client ID/secret + redirect URI
+    https://<new_ref>.supabase.co/auth/v1/callback + Site URL.
+  - Delete the local .backup (it holds password hashes) once verified.
+  - Optional: JWT secret copy (dashboard-only) if existing sessions must survive.
+  - If external workers (Fly.io, Railway, ...) point at the old URL, re-point them.
+```
+
+## FRESH-PROJECT PATH (legacy fallback)
+
+The complete v3.1 flow - 68 deterministic steps, 9 phases, MCP-driven scan and
+rebuild into a NEW Lovable project - lives in
+[references/fresh-project-path.md](references/fresh-project-path.md).
+
+Use it when:
+- The database exceeds the 5 GB export cap (also: email support@lovable.dev with
+  the project ID for a manual export).
+- The export feature is unavailable or failing for the project.
+- The user wants the original Cloud project kept running/untouched (staging-style
+  migration with zero risk to the original).
+
+That reference keeps its own trap table (Traps 1-16) and troubleshooting rows.
+
+## Traps Added in v4 (17-26, all hit and verified live)
+
+| Trap | Severity | Description | Prevention |
 |---|---|---|---|
-| 1 | Critical | TanStack default changed May 6, 2026 | Step 2 (detect), Step 57 (pass tech_stack) |
-| 2 | Degradation | us-east-1 capacity outages | Step 22 (default us-west-1) |
-| 3 | Degradation | pg_net not enabled by default | Step 24 (enable first in Phase 3) |
-| 4 | Silent bug | Private buckets return 400 with public URLs | Step 14 (detect visibility), Step 46 (signed URLs) |
-| 5 | Silent bug | verify_jwt per function ignored | Step 3 (read config.toml), Step 52 (pass per-function) |
-| 6 | Silent bug | Edge function secrets not listed | Step 51 (grep Deno.env.get), Step 53 (inventory) |
-| 7 | Silent bug | URLs in JSONB and arrays not rewritten | Step 15 (scan all text/jsonb), Step 40 (rewrite all) |
-| 8 | Critical | Custom functions/triggers not migrated | Step 9-10 (scan), Steps 28-29 (create) |
-| 9 | Critical | Sequences last_value reset to 1 | Step 11 (scan with last_value), Step 27 (setval) |
-| 10 | Degradation | Custom indexes not recreated | Step 12 (scan), Step 30 (recreate) |
-| 11 | Critical | auth.identities not migrated | Step 13 (scan), Step 34 (insert) |
-| 12 | Silent bug | Phase 9 verifies almost nothing | Steps 63-65 (compare 12 categories) |
-| 13 | Silent bug | Database extensions not recreated | Step 16 (scan), Step 24 (enable all) |
-| 14 | Silent bug | Cron jobs lost silently | Step 17 (detect), Step 68 (remind to recreate) |
-| 15 | Silent bug | Vault secrets not migrated | Step 18 (detect names), Step 68 (remind to re-enter) |
-| 16 | Silent bug | Shared edge function code (_shared/) not deployed | Step 50 (detect), Step 52 (CLI deploy) |
+| 17 | Critical | Export saves INTO Cloud storage - Remove deletes it | Sacred order: Export -> DOWNLOAD -> Remove last (Steps 5-7, 29) |
+| 18 | Blocker | brew libpq pg_restore lacks zstd, fails on the .backup | Test with pg_restore --list first; postgresql@18 (Step 13) |
+| 19 | Critical | auth.identities dropped by restore FK ordering | Count check + second data-only pass (Step 15) |
+| 20 | Silent bug | cron.job restore = permission denied; restored/recreated commands point at OLD project URL and run against a dead endpoint | cron.schedule + zombie hunt + cron.alter_job (Step 17) |
+| 21 | Silent bug | storage.objects ghost rows block uploads ("resource already exists"); protect_delete blocks SQL DELETE | Clear via Storage API/CLI before upload, never SQL (Step 18) |
+| 22 | Silent bug | Signed URLs (?token=) die with the old project; text-replace makes them LOOK migrated | Regenerate or NULL, never rewrite (Step 20) |
+| 23 | Breaker | Supabase integration overwrites client.ts, breaks SSR on modern stack | Post-connect fix prompt with explicit Do NOTs (Step 31) |
+| 24 | Zombie | Temp helper functions replicate back via two-way GitHub sync | Delete in Supabase AND in the repo (Step 25) |
+| 25 | Surprise (good) | LOVABLE_API_KEY survives Cloud removal (workspace secret) | Re-wire: server functions (recommended) or copy the key (Step 24) |
+| 26 | Data loss | Restore is a snapshot at EXPORT time; later writes are missing | Ask when writes stopped; re-export or re-apply deltas (Step 16) |
 
-## Common Mistakes to Avoid
+## Human Assistance Points (same-project path)
 
-| Mistake | What happens | Correct approach |
+| Step | What the user must do | Why not automated |
 |---|---|---|
-| Using remix to copy project | Inherits Lovable Cloud, cannot connect own Supabase | Create new empty project + push code via GitHub |
-| Generating temp passwords | Users cannot log in with original credentials | Copy encrypted_password bcrypt hashes from auth.users |
-| Inserting profiles before auth.users | FK violation, must drop constraint | Insert auth.users FIRST, then profiles |
-| Trying to pull code from GitHub into Lovable | GitHub integration is one-way OUT from Lovable | Push TO the connected GitHub repo from outside |
-| Using send_message to rebuild code | Agent may modify files | Only use send_message for rebuild, not code creation |
-| Skipping auth.identities | Login works but session recovery breaks | Always migrate auth.identities alongside auth.users |
-| Using public URL for private bucket | Download returns 400, files silently skipped | Use signed URLs for private buckets |
-| Wrong tech_stack on create_project | Lovable build fails, framework mismatch | Detect from package.json, default to "classic" |
-| Skipping handle_new_user function | New signups succeed but no profile row created | Scan and migrate all custom functions and triggers |
-| Not setting sequences last_value | Duplicate keys or FK violations on new records | Use setval with the source last_value |
-| Not scanning for cron jobs | Scheduled tasks stop running silently | Scan cron.job in Phase 1, remind in Phase 9 |
-| Not scanning for vault secrets | Functions fail at runtime with missing secrets | Scan vault.secrets names in Phase 1, remind in Phase 9 |
-| Only enabling pg_net extension | Other extensions (pg_cron, pgcrypto, etc.) missing | Scan all extensions in Phase 1, enable all in Phase 3 |
-| Deploying only index.ts per function | Functions with shared imports or multi-file structure fail | Read all files per function, use CLI if _shared/ exists |
+| 1 | Connect GitHub in the editor | Dashboard-only flow |
+| 5 | Click Export project data | Dashboard-only button |
+| 7 | Download the export zip | Browser download |
+| 8 | Download storage files (small projects) | Browser download (scriptable for large) |
+| 23 | Enter edge function secrets | No MCP/agent can set secrets |
+| 29 | Click Remove Lovable Cloud | Destructive, deliberately manual |
+| 30 | Connect own Supabase | Dashboard OAuth flow |
+| 33 | OAuth providers, JWT secret | Dashboard-only settings |
+| Cost | Confirm Supabase project cost | MCP requires explicit confirmation |
 
-## Things That Can Go Wrong
+## Things That Can Go Wrong (v4 additions)
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `create_project` returns capacity error | us-east-1 outage (Trap 2) | Retry with `us-west-1` |
-| `net.http_post does not exist` | pg_net not enabled (Trap 3) | Run Step 24: `CREATE EXTENSION IF NOT EXISTS pg_net WITH SCHEMA extensions` |
-| Storage migration shows 0 files migrated | Private bucket, public URL returns 400 (Trap 4) | Use signed URLs from source (Step 43) |
-| Edge function returns 401 on webhook | verify_jwt is true but caller has no JWT (Trap 5) | Redeploy with `verify_jwt: false` per config.toml |
-| Edge function fails with "API key not configured" | Secrets not set in destination (Trap 6) | Set secrets in dashboard per Step 50 inventory |
-| Broken images after migration | URLs in JSONB not rewritten (Trap 7) | Re-run Step 40 on all text/jsonb columns |
-| New signups succeed but app crashes on profile load | handle_new_user trigger missing (Trap 8) | Re-run Steps 28-29 to create functions and triggers |
-| Duplicate order numbers or PK collisions | Sequence last_value reset (Trap 9) | Re-run Step 27 with correct setval |
-| Slow queries after migration | Custom indexes not recreated (Trap 10) | Re-run Step 30 |
-| Password recovery or session refresh fails | auth.identities not migrated (Trap 11) | Re-run Step 34 |
-| Lovable build fails after code push | Wrong tech_stack (Trap 1) | Delete project, recreate with correct tech_stack from Step 2 |
-| `apply_migration` rejected with dependency error | Wrong creation order in Phase 3 | Follow exact order: extensions -> enums -> tables -> sequences -> functions -> triggers -> indexes -> RLS |
-| pg_net returns null content | Edge function crashed or timed out | Check `error_msg` in `net._http_response`, split into smaller batches |
-| All migration looks good but verification shows mismatches | Phase 9 was incomplete (Trap 12) | Run the full 12-category audit in Step 63 |
-| Cron jobs not running after migration | Cron jobs exist in source but not recreated (Trap 14) | Check cron_jobs from Step 17, recreate in destination |
-| Edge functions fail with missing extension | pg_cron or other extensions not enabled (Trap 13) | Enable all source extensions in Step 24 |
-| Vault-dependent functions return errors | Vault secrets not re-entered in destination (Trap 15) | Re-enter secret values in Supabase Dashboard -> Vault |
-| Edge functions deploy but fail with import errors | _shared/ directory not included in deployment (Trap 16) | Use `supabase functions deploy --all` via CLI instead of MCP |
-| Edge function deployment is extremely slow | Too many functions deployed one-by-one via MCP | Use CLI: `supabase functions deploy --all --project-ref <ref>` |
+| "does not support compression with zstd" on restore | brew libpq build (Trap 18) | postgresql@18 binaries |
+| Hundreds of errors scroll during pg_restore | Managed schemas already exist - EXPECTED | Nothing; verify counts after |
+| identities count < users count after restore | FK ordering (Trap 19) | pg_restore --data-only -n auth -t identities |
+| "permission denied for table job" during restore | cron schema is protected (Trap 20) | Recreate via cron.schedule |
+| Cron jobs run but nothing happens | Zombie commands hitting the OLD project URL (Trap 20) | cron.alter_job with new URL |
+| Upload fails "The resource already exists" | Ghost storage.objects rows (Trap 21) | Delete via Storage API/CLI, then upload |
+| DELETE FROM storage.objects fails/blocked | protect_delete trigger (Trap 21) | Storage API/CLI, not SQL |
+| database_export_* bucket appears in the NEW project | Its metadata rows rode in with the restore | Delete the bucket in the new project |
+| Images broken only where URLs have ?token= | Signed URLs from the old project (Trap 22) | Regenerate signed URLs, don't text-replace |
+| Error page right after Connect | client.ts overwritten by integration template (Trap 23) | Step 31 fix prompt - wiring only |
+| Deleted helper function reappears | Still in the repo, GitHub sync restored it (Trap 24) | Delete from supabase/functions/ too |
+| AI features dead after migration | Edge functions can't read Lovable's secret store (Trap 25) | Server functions or copy LOVABLE_API_KEY |
+| Recent user/data changes missing in new project | Export predates them (Trap 26) | Re-export or re-apply deltas |
+| Export email never arrives | Toast/email unreliable | Check Storage for database_export_* bucket |
+
+Legacy symptoms (fresh-project path) remain in
+[references/fresh-project-path.md](references/fresh-project-path.md) and
+[references/troubleshooting.md](references/troubleshooting.md).
 
 ## Plan Requirements
 
 | Tool | Plan needed | Cost |
 |---|---|---|
-| Claude Code | Pro or Max | $20/mo+ |
-| Lovable | Plan with Cloud enabled | Varies |
+| Lovable | Any plan with Cloud | Varies |
 | Supabase | Free works if slot available | $0-$10/mo |
+| Claude Code (optional, automates everything) | Pro or Max | $20/mo+ |
+| claude.ai (optional, no-CLI route) | Free/Pro | $0+ |
 | GitHub | Free | $0 |
 
 ## Documentation Links
 
 | Resource | URL |
 |---|---|
-| Lovable MCP setup | https://docs.lovable.dev/integrations/mcp-servers |
-| Lovable Cloud | https://docs.lovable.dev/integrations/cloud |
+| Lovable Cloud (export, pause, remove) | https://docs.lovable.dev/integrations/cloud |
 | Lovable GitHub integration | https://docs.lovable.dev/integrations/github |
-| Supabase MCP setup | https://supabase.com/docs/guides/getting-started/mcp |
+| Lovable MCP | https://docs.lovable.dev/integrations/mcp-servers |
+| Supabase: restore a backup | https://supabase.com/docs/guides/platform/migrating-within-supabase/dashboard-restore |
+| Supabase: database backups | https://supabase.com/docs/guides/platform/backups |
+| Supabase MCP | https://supabase.com/docs/guides/getting-started/mcp |
 | Supabase Edge Functions | https://supabase.com/docs/guides/functions |
 | Supabase Storage | https://supabase.com/docs/guides/storage |
-| Supabase Auth Admin API | https://supabase.com/docs/reference/javascript/admin-api |
-| Supabase Auth user management | https://supabase.com/docs/guides/auth/managing-user-data |
-| Claude Code | https://docs.anthropic.com/en/docs/claude-code/overview |
-| GitHub CLI quickstart | https://docs.github.com/en/github-cli/github-cli/quickstart |
-| Supabase pricing | https://supabase.com/pricing |
+| Supabase Auth | https://supabase.com/docs/guides/auth |
 
 ## Resources by Carol Monroe
 
-- Migration guide (MCP method): https://carolmonroe.com/blog/lovable-cloud-mcp-migration
-- Export guide (deprecated - pre-MCP method): https://carolmonroe.com/blog/export-lovable-cloud-claude-code
-- Disconnect guide: https://carolmonroe.com/blog/disconnect-lovable-cloud
+- Full guide with screenshots (the flow this skill automates):
+  https://carolmonroe.com/blog/export-remove-lovable-cloud
+- Migrate with AI guide (claude.ai route + Claude Code route):
+  https://carolmonroe.com/blog/migrate-lovable-cloud-with-ai
+- Legacy MCP migration guide (fresh-project path):
+  https://carolmonroe.com/blog/lovable-cloud-mcp-migration
+- MCP setup for claude.ai chat:
+  https://carolmonroe.com/blog/connect-lovable-supabase-mcp-to-claude

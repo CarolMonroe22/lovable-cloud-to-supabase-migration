@@ -1,6 +1,28 @@
 # Data Export Methods
 
-## Method 1: Lovable MCP query_database (RECOMMENDED)
+## Method 0: Native Cloud Export (PRIMARY since July 2026)
+
+The official export button: Cloud tab > Overview > Advanced settings > **Export project data**. Produces a `pg_dump` custom-format `.backup` (zstd compressed, inside a .zip), saved into the project's OWN Cloud storage as a bucket named like `database_export_06_07_26`. Limits: 5 GB, one export per 24 hours. Verified contents (full TOC read, July 2026):
+
+| Included | Not included |
+|---|---|
+| Full schema: public, auth, storage, cron, vault | Storage FILES (metadata rows only - actual bytes travel separately) |
+| All table data | Edge function CODE (lives in the repo) |
+| RLS policies, triggers, custom functions | Edge function SECRET values (never exportable) |
+| Sequences WITH current values | Vault secret VALUES (rows restore but can't decrypt cross-project) |
+| auth.users + auth.identities WITH bcrypt hashes | |
+| cron.job rows (schedules transfer, commands point at OLD URLs) | |
+
+Three rules:
+1. **Download before Remove** - the export lives inside the Cloud storage that Remove deletes.
+2. **Don't wait for the email** - the toast is unreliable; check Storage after ~1 minute.
+3. **Restore needs pg_restore 16+ built WITH zstd** - brew's libpq fails regardless of version; use `postgresql@18`.
+
+This replaces Methods 1-3 as the data source whenever the export is available. Use the methods below when it isn't (DB > 5 GB, export failing, or fresh-project path).
+
+---
+
+## Method 1: Lovable MCP query_database (fallback / large DBs)
 
 The fastest and most complete method. Requires Claude Code with Lovable MCP connected.
 
@@ -130,8 +152,9 @@ for (const file of files) {
 
 | Method | Auth users | Passwords | Schema | Data | Storage | Requires |
 |---|---|---|---|---|---|---|
+| Native export | Yes | Yes | Yes | Yes | Metadata only | One button click (+ pg_restore w/zstd) |
 | MCP query_database | Yes | Yes | Yes | Yes | Via URLs | Claude Code + Lovable MCP |
 | Edge Function | Partial | No | No | Yes | Partial | Lovable chat |
 | REST API | No | No | No | Partial | No | URL + anon key |
 
-**Recommendation:** Use Method 1 (MCP) whenever possible. It's the only method that gives you everything including passwords.
+**Recommendation:** Use Method 0 (native export) whenever available - one click, complete, official. Fall back to Method 1 (MCP) for databases over 5 GB or when the export is unavailable. Storage files always travel separately in every method.

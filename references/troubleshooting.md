@@ -2,9 +2,31 @@
 
 ## "Can't disconnect Lovable Cloud"
 
-Lovable Cloud is permanent once enabled. There is no disconnect button.
+**Outdated since July 2026.** Lovable Cloud can now be removed: Cloud tab > Overview > Advanced settings > **Remove Lovable Cloud** (with Export and Pause next to it). Follow the SACRED ORDER in SKILL.md: export, download everything, build and verify the new Supabase, and only then Remove.
 
-**Solution:** Create new blank Lovable project, connect your own Supabase, push code via GitHub. Full process in SKILL.md.
+The old workaround (new blank project + own Supabase + GitHub push) is now the fresh-project fallback path: see references/fresh-project-path.md.
+
+---
+
+## pg_restore fails with "does not support compression with zstd"
+
+The export is zstd-compressed and your pg_restore build lacks zstd, even if the version is 16+. Common with Homebrew's libpq.
+
+**Solution:** `brew install postgresql@18` and call its binary explicitly: `/opt/homebrew/opt/postgresql@18/bin/pg_restore`.
+
+---
+
+## Hundreds of errors during pg_restore
+
+Expected. The new Supabase project already has managed auth/storage/cron/vault foundations; the backup tries to recreate them and gets "already exists" / "permission denied". Data lands fine. Verify with the 12-count gate, not the error count.
+
+---
+
+## Storage upload fails "The resource already exists"
+
+The restore brought storage.objects METADATA rows (ghosts pointing at files that don't exist). SQL DELETE on them is blocked (protect_delete trigger).
+
+**Solution:** Delete ghost objects via the Storage API, CLI, or dashboard multi-select, then upload. Also delete the restored `database_export_*` bucket.
 
 ---
 
