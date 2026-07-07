@@ -1,6 +1,6 @@
 # Lovable Cloud to Supabase Migration
 
-[![Version](https://img.shields.io/badge/version-4.0.1-FF5CD7)](https://github.com/CarolMonroe22/lovable-cloud-to-supabase-migration)
+[![Version](https://img.shields.io/badge/version-4.0.2-FF5CD7)](https://github.com/CarolMonroe22/lovable-cloud-to-supabase-migration)
 [![Tested](https://img.shields.io/badge/tested-2026--07--06-green)](https://github.com/CarolMonroe22/lovable-cloud-to-supabase-migration)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](./LICENSE)
 
