@@ -561,7 +561,7 @@ Legacy symptoms (fresh-project path) remain in
 
 ## Resources by Carol Monroe
 
-- Full guide with screenshots (the flow this skill automates):
+- The manual walkthrough this skill automates:
   https://carolmonroe.com/blog/export-remove-lovable-cloud
 - Migrate with AI guide (claude.ai route + Claude Code route):
   https://carolmonroe.com/blog/migrate-lovable-cloud-with-ai

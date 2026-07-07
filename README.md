@@ -108,7 +108,7 @@ Also works in **Cursor** and other MCP-compatible agents.
 
 | Resource | Link |
 |---|---|
-| Full migration guide with screenshots | [carolmonroe.com/blog/export-remove-lovable-cloud](https://carolmonroe.com/blog/export-remove-lovable-cloud) |
+| The manual walkthrough this skill automates | [carolmonroe.com/blog/export-remove-lovable-cloud](https://carolmonroe.com/blog/export-remove-lovable-cloud) |
 | Migrate with AI (claude.ai + Claude Code routes) | [carolmonroe.com/blog/migrate-lovable-cloud-with-ai](https://carolmonroe.com/blog/migrate-lovable-cloud-with-ai) |
 | Legacy MCP migration guide | [carolmonroe.com/blog/lovable-cloud-mcp-migration](https://carolmonroe.com/blog/lovable-cloud-mcp-migration) |
 | MCP setup for claude.ai chat | [carolmonroe.com/blog/connect-lovable-supabase-mcp-to-claude](https://carolmonroe.com/blog/connect-lovable-supabase-mcp-to-claude) |
