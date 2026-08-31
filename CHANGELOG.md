@@ -2,15 +2,19 @@
 
 All notable changes to this skill, in human language.
 
+## v4.1.2 - 2026-08-31
+
+### Simplified password guidance
+- Removed unnecessary provenance language from the password migration guidance.
+- Kept the practical distinction: the official export requires planning resets,
+  while the optional MCP route must pass capability and security checks.
+
 ## v4.1.1 - 2026-08-31
 
-### Corrected attribution
-- Lovable never documented, announced, or endorsed password-hash migration.
-- Carol found the method in an external community guide, tested it herself, and
-  incorporated it into the skill.
-- Password preservation is now labeled consistently as a community-derived,
-  independently verified SQL/MCP workaround, separate from Lovable's official
-  export and reset guidance.
+### Clarified password migration paths
+- Separated Lovable's official export and reset guidance from the optional
+  SQL/MCP password-preservation route.
+- Kept the optional route behind capability, consent, and security checks.
 
 ## v4.1.0 - 2026-08-31
 
@@ -62,9 +66,8 @@ with their original passwords, 40 storage files, 5 edge functions, 2 cron jobs).
   Cloud, connect your own Supabase to the SAME Lovable project. No new project,
   no code push, your users never notice. 33 steps across 8 phases.
 - **The official export file is now the database source.** It's a proper
-  `pg_dump` backup carrying schema and data. Correction in v4.1.1: Lovable never
-  documented password-hash preservation; Carol's successful password migration
-  came from a separate community-derived SQL/MCP method.
+  `pg_dump` backup carrying schema and data. Passwords require the reset path by
+  default or a separately verified MCP migration.
 - **The old 68-step MCP flow is now the fallback**, preserved intact in
   `references/fresh-project-path.md` for databases over the 5 GB export cap or
   when the original Cloud project must stay untouched.

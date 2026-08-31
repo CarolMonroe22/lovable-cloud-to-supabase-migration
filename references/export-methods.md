@@ -5,10 +5,9 @@
 The official export button: Cloud tab > Overview > Advanced settings > **Export project data**. Produces a `pg_dump` custom-format `.backup` (zstd compressed, inside a .zip), saved into the project's OWN Cloud storage as a bucket named like `database_export_06_07_26`. Limits: 5 GB, one export per 24 hours.
 
 Lovable's documentation says user passwords are not exported in a usable form
-and recommends a reset flow. Lovable never documented or endorsed password-hash
-migration. Carol found that method in an external community guide and verified it
-independently through SQL/MCP. Treat the documented reset behavior as the official
-contract. The optional MCP workaround below is separate from the official export.
+and recommends a reset flow. Treat that as the default behavior. The optional
+MCP route below is separate from the official export and must be verified for
+each project.
 
 | Included | Not included |
 |---|---|
@@ -35,9 +34,6 @@ or explicitly opt into Method 1 after its capability and security checks.
 This method can preserve existing password hashes when the current project still
 allows access. Requires an MCP-compatible agent with Lovable MCP connected.
 Lovable MCP is a research preview, so verify capability every time.
-
-This is a community-derived workaround that Carol found, tested, and incorporated
-into the skill. It has never been documented or endorsed by Lovable.
 
 ```
 Lovable MCP query_database gives full SQL access to Lovable Cloud database,

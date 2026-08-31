@@ -6,7 +6,7 @@ metadata:
   author: Carol Monroe - Lovable Champion and Supabase SupaSquad Member
   author_url: https://carolmonroe.com
   author_github: CarolMonroe22
-  version: "4.1.1"
+  version: "4.1.2"
   tested: "2026-08-31"
   tags:
     - supabase
@@ -26,19 +26,17 @@ metadata:
 > 2026-07-06. Password-hash access through Lovable MCP was rechecked on
 > 2026-08-31 without exposing any hash values.
 
-## What Changed in v4.1 (August 2026)
+## What Changed in v4.1.2 (August 2026)
 
 Lovable's official documentation says that user passwords are not exported in a
-usable form and recommends a password-reset flow for migrated users. Lovable
-never documented or endorsed the separate password-hash method. Carol found that
-method in an external community guide, tested it herself, and incorporated it
-into this migration playbook.
+usable form and recommends a password-reset flow for migrated users. This skill
+therefore treats password reset as the default path.
 
 The native export is still the primary source for the database, but it must never
 be presented as a password-preserving export.
 
-That community-derived workaround is now the separate advanced route: Lovable
-MCP `query_database` can still read
+An optional advanced route remains available when Lovable MCP `query_database`
+can read
 `auth.users.encrypted_password` on supported Cloud projects. A boolean-only
 capability check succeeded on 2026-08-31, and the complete hash-preserving flow
 was previously verified in March and July 2026. This route is optional,
@@ -141,10 +139,8 @@ gate, and the Remove click.
   Homebrew does NOT include zstd and fails with "does not support compression with
   zstd" even when the version number looks fine. Use `postgresql@18` (Trap 18).
 - Lovable's documentation says password material is not exported in a usable
-  form. Carol's password-preserving tests used a separate community-derived
-  SQL/MCP workaround. They were not evidence of an official Lovable export
-  capability. Treat the export as carrying users, not usable passwords, and plan
-  resets unless the optional MCP route is completed.
+  form. Treat the export as carrying users, not usable passwords, and plan resets
+  unless the optional MCP route is completed and verified.
 - INCLUDED for the supported database flow: schema and data, RLS policies,
   triggers, custom functions, sequences, cron and storage metadata. Verify every
   component against the baseline because the export contract can change.
@@ -160,8 +156,6 @@ gate, and the Remove click.
 ### Passwords: official default vs advanced MCP route
 - **Official default:** Lovable says passwords are not exported in a usable form.
   Build and test a password-reset flow before removing Cloud.
-- **Attribution:** Lovable never documented or endorsed hash preservation. Carol
-  learned the method from an external community guide and verified it herself.
 - **Advanced option:** Run a capability check that returns only counts, never
   hashes. If non-empty hashes are accessible, explain that the values will pass
   through MCP/agent execution, obtain explicit approval, then migrate only the

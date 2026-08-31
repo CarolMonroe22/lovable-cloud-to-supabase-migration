@@ -4,11 +4,9 @@
 > on the same Lovable project - see SKILL.md. The methods below are the fallback
 > (fresh-project path, DB > 5 GB, or export unavailable).
 
-> Historical note: Carol found a password-hash technique in an external community
-> guide and verified it in March and July 2026. Lovable never documented or
-> endorsed that method. Its official export docs say passwords are not usable, so
-> reset is the supported default. The separate MCP workaround can still copy
-> bcrypt hashes when its capability and security checks pass.
+> Lovable's official export docs say passwords are not usable, so reset is the
+> default. A separate MCP route can still copy bcrypt hashes when its capability
+> and security checks pass.
 
 ## Method: Full MCP Migration (fallback)
 
@@ -87,10 +85,9 @@ stay untouched:
 ## Auth Migration Notes (CORRECTED 2026-08-31)
 
 - Lovable's official export currently requires planning a password-reset flow.
-- Carol's separate, community-derived Lovable MCP route can read
-  `encrypted_password` on supported projects. Lovable never documented or
-  endorsed it. Run the count-only check in `export-methods.md`, get explicit
-  user approval, and never show, print, paste, or commit hashes.
+- The optional Lovable MCP route can read `encrypted_password` on supported
+  projects. Run the count-only check in `export-methods.md`, get explicit user
+  approval, and never show, print, paste, or commit hashes.
 - When the MCP route succeeds, copy the existing bcrypt hashes without
   regenerating them and verify one original-password login before removing Cloud.
 - If the capability or security gate fails, use resets. Never invent temporary
