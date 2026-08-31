@@ -6,6 +6,11 @@
 > and migrate into a NEW Lovable project instead).
 > For the primary same-project path (official Export + Remove + Connect), see SKILL.md.
 
+> Password note, updated 2026-08-31: the official Lovable export path now
+> requires a reset plan. This fallback can preserve hashes only through the
+> advanced MCP route below, after a count-only capability check and explicit
+> approval for sensitive handling.
+
 Prerequisites for THIS path: Lovable MCP (required - the whole scan phase runs on
 query_database), Supabase MCP, GitHub CLI (`gh` + auth), git, and optionally the
 Supabase CLI for bulk function deploys. See the Prerequisites table in SKILL.md.
@@ -110,11 +115,25 @@ Step 12: Get custom indexes (Trap 10)
   Save: custom_indexes
 
 Step 13: Export auth users and identities (Trap 11)
+  First run a capability check that returns counts only:
+  SELECT count(*) AS total_users,
+         count(*) FILTER (
+           WHERE encrypted_password IS NOT NULL AND encrypted_password <> ''
+         ) AS users_with_password_hash
+  FROM auth.users;
+
+  Continue only if users_with_password_hash > 0 and every expected password user
+  is accounted for. OAuth and passwordless users may correctly have no hash and
+  need their provider-specific path. Explain that hash values will pass through
+  MCP/agent execution and get explicit approval before continuing. Never repeat
+  hashes in user-facing output or ordinary logs. If the check fails, use resets.
+
   Lovable MCP: query_database
   SELECT id, email, encrypted_password, email_confirmed_at,
          raw_user_meta_data, raw_app_meta_data, created_at
   FROM auth.users ORDER BY created_at
-  Save: auth_users
+  Save: auth_users only in protected transient migration state. Never commit,
+  paste, print, or keep the hashes after verification.
 
   Lovable MCP: query_database
   SELECT id, user_id, provider, provider_id, identity_data,
@@ -367,7 +386,9 @@ Step 33: Insert auth.users with ORIGINAL encrypted_password hashes
     '{created_at}', now(), 'authenticated', 'authenticated'
   );
 
+  Only run this step after the Step 13 capability and approval gate.
   NEVER generate temporary passwords. ALWAYS copy the original bcrypt hash.
+  If protected handling cannot be guaranteed, stop and use password resets.
   Expected output: auth.users count matches source
 
 Step 34: Insert auth.identities (Trap 11)
@@ -745,7 +766,9 @@ Step 66: Visual check
   Check that images load (storage URLs rewritten correctly).
 
 Step 67: Test login with original credentials
-  Use one of the migrated user emails + original password.
+  When the approved MCP hash route was used, test one migrated email + original
+  password. When it was not used, complete the password-reset flow and test the
+  new password instead.
   If login fails, check:
     - encrypted_password was copied correctly (not regenerated)
     - auth.identities were migrated (Step 31)
@@ -813,7 +836,8 @@ All 16 traps are integrated as explicit steps in their respective phases. This t
 | Mistake | What happens | Correct approach |
 |---|---|---|
 | Using remix to copy project | Remix inherits its own fresh Cloud state - two Cloud instances mid-migration, unclear where data lives | Create new empty project + push code via GitHub |
-| Generating temp passwords | Users cannot log in with original credentials | Copy encrypted_password bcrypt hashes from auth.users |
+| Assuming the native export guarantees usable passwords | Migrated users can be locked out | Plan resets, or use the MCP hash route after capability check and approval |
+| Generating temp passwords | Users get unknown or insecure credentials | Preserve the exact hash through the approved MCP route, or use resets |
 | Inserting profiles before auth.users | FK violation, must drop constraint | Insert auth.users FIRST, then profiles |
 | Trying to pull code from GitHub into Lovable | GitHub integration is one-way OUT from Lovable | Push TO the connected GitHub repo from outside |
 | Using send_message to rebuild code | Agent may modify files | Only use send_message for rebuild, not code creation |

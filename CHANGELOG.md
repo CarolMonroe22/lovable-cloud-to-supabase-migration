@@ -2,6 +2,30 @@
 
 All notable changes to this skill, in human language.
 
+## v4.1.0 - 2026-08-31
+
+Lovable's current documentation now says passwords from the official project
+export are not usable and migrated users should reset them. This release removes
+the guarantee that the native export preserves passwords.
+
+### Changed
+- The official Export + Remove + Connect path now plans and tests a password reset
+  by default.
+- The previously verified password-hash method remains available as an advanced,
+  optional Lovable MCP route.
+- The MCP route now starts with a count-only capability check, requires explicit
+  approval, and forbids showing, pasting, printing, logging, or committing hashes.
+- The verification gate accepts either a completed reset login or an original-
+  password login after successful MCP preservation.
+
+### Verified
+- On 2026-08-31, Lovable MCP still reported access to non-empty
+  `auth.users.encrypted_password` values on a Cloud project. The check returned
+  only a boolean/count and exposed no hash.
+- The end-to-end hash-preserving route remains historically verified in March
+  and July 2026. Because Lovable MCP is a research preview, it must be rechecked
+  per project.
+
 ## v4.0.2 - 2026-07-07
 
 Follow-up fixes from the second review of the fresh-project path docs.

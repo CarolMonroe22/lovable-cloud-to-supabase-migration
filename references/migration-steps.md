@@ -1,12 +1,13 @@
-# Migration Steps (Updated 2026-07-06)
+# Migration Steps (Updated 2026-08-31)
 
 > Since July 2026 the PRIMARY method is the native Export + Remove + Connect flow
 > on the same Lovable project - see SKILL.md. The methods below are the fallback
 > (fresh-project path, DB > 5 GB, or export unavailable).
 
-> Previous version of this guide said passwords can't be exported. That was WRONG.
-> Passwords CAN be migrated: they come in the native export, or by copying the
-> bcrypt hashes from auth.users via MCP.
+> Historical note: password-preserving migrations worked in March and July 2026.
+> Lovable's current official docs now say its export does not provide passwords
+> in a usable form, so reset is the supported default. The separate MCP route can
+> still copy bcrypt hashes when its capability and security checks pass.
 
 ## Method: Full MCP Migration (fallback)
 
@@ -23,7 +24,7 @@ This method uses Lovable MCP + Supabase MCP + GitHub CLI to automate the entire 
 1. **Scan Source** - Read schema, data, auth users, storage URLs from Lovable Cloud via MCP
 2. **Create Destination** - New Supabase project via MCP
 3. **Apply Schema** - Enums, tables, constraints, RLS policies
-4. **Auth Users** - Insert with original bcrypt password hashes (BEFORE data)
+4. **Auth Users** - Import users BEFORE dependent data; use resets by default or original bcrypt hashes only through the approved MCP route
 5. **Insert Data** - Catalogs first, then user-owned, then junction tables
 6. **Storage** - Create buckets, deploy migration function, transfer files, rewrite URLs
 7. **Edge Functions** - Deploy all functions to new project
@@ -34,7 +35,7 @@ This method uses Lovable MCP + Supabase MCP + GitHub CLI to automate the entire 
 - Database schema (tables, enums, constraints, FKs)
 - RLS policies (all of them, identical)
 - All data (preserving UUIDs and timestamps)
-- Auth users with original passwords
+- Auth users and identities; original passwords only through the optional MCP route
 - Storage buckets and files
 - Edge functions
 - Frontend code (exact same files)
@@ -50,7 +51,7 @@ For users without Claude Code, the edge function approach still works but is mor
 2. Call it to get JSON data
 3. Manually create tables in new Supabase
 4. Import data via Supabase dashboard or CLI
-5. Users must reset passwords (this legacy method can't access auth.users - the native export and the MCP method both carry passwords, use those instead)
+5. Users must reset passwords (this legacy method can't access `encrypted_password`)
 
 See [export-methods.md](export-methods.md) for the edge function template.
 
@@ -82,11 +83,16 @@ stay untouched:
 
 ---
 
-## Auth Migration Notes (CORRECTED)
+## Auth Migration Notes (CORRECTED 2026-08-31)
 
-- Passwords **CAN be exported** via Lovable MCP: `SELECT encrypted_password FROM auth.users`
-- Copy the bcrypt hashes directly to the new project's auth.users table
-- Users log in with their exact same credentials - no password reset needed
+- Lovable's official export currently requires planning a password-reset flow.
+- A separate Lovable MCP route can read `encrypted_password` on supported
+  projects. Run the count-only check in `export-methods.md`, get explicit user
+  approval, and never show, print, paste, or commit hashes.
+- When the MCP route succeeds, copy the existing bcrypt hashes without
+  regenerating them and verify one original-password login before removing Cloud.
+- If the capability or security gate fails, use resets. Never invent temporary
+  passwords.
 - Google OAuth users need correct redirect URIs configured in new project
 - User metadata (display names, avatars) is in raw_user_meta_data jsonb column
 

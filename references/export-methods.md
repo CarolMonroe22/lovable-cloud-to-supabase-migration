@@ -1,8 +1,13 @@
 # Data Export Methods
 
-## Method 0: Native Cloud Export (PRIMARY since July 2026)
+## Method 0: Native Cloud Export (PRIMARY database source)
 
-The official export button: Cloud tab > Overview > Advanced settings > **Export project data**. Produces a `pg_dump` custom-format `.backup` (zstd compressed, inside a .zip), saved into the project's OWN Cloud storage as a bucket named like `database_export_06_07_26`. Limits: 5 GB, one export per 24 hours. Verified contents (full TOC read, July 2026):
+The official export button: Cloud tab > Overview > Advanced settings > **Export project data**. Produces a `pg_dump` custom-format `.backup` (zstd compressed, inside a .zip), saved into the project's OWN Cloud storage as a bucket named like `database_export_06_07_26`. Limits: 5 GB, one export per 24 hours.
+
+The July 2026 test export contained auth users and usable bcrypt hashes. Lovable's
+current documentation now says user passwords are not exported in a usable form
+and recommends a reset flow. Treat the current documented behavior as the
+contract. The optional MCP method below is separate from the official export.
 
 | Included | Not included |
 |---|---|
@@ -10,7 +15,7 @@ The official export button: Cloud tab > Overview > Advanced settings > **Export 
 | All table data | Edge function CODE (lives in the repo) |
 | RLS policies, triggers, custom functions | Edge function SECRET values (never exportable) |
 | Sequences WITH current values | Vault secret VALUES (rows restore but can't decrypt cross-project) |
-| auth.users + auth.identities WITH bcrypt hashes | |
+| Auth records, subject to verification | Usable passwords are not guaranteed; plan resets |
 | cron.job rows (schedules transfer, commands point at OLD URLs) | |
 
 Three rules:
@@ -18,19 +23,44 @@ Three rules:
 2. **Don't wait for the email** - the toast is unreliable; check Storage after ~1 minute.
 3. **Restore needs pg_restore 16+ built WITH zstd** - brew's libpq fails regardless of version; use `postgresql@18`.
 
-This replaces Methods 1-3 as the data source whenever the export is available. Use the methods below when it isn't (DB > 5 GB, export failing, or fresh-project path).
+This replaces Methods 1-3 as the database source whenever the export is
+available. It does not replace the auth decision: use password resets by default,
+or explicitly opt into Method 1 after its capability and security checks.
 
 ---
 
-## Method 1: Lovable MCP query_database (fallback / large DBs)
+## Method 1: Lovable MCP query_database (advanced, optional)
 
-The fastest and most complete method. Requires Claude Code with Lovable MCP connected.
+This method can preserve existing password hashes when the current project still
+allows access. Requires an MCP-compatible agent with Lovable MCP connected.
+Lovable MCP is a research preview, so verify capability every time.
 
 ```
 Lovable MCP query_database gives full SQL access to Lovable Cloud database,
 including auth.users (with encrypted passwords), all public tables, 
 storage.objects, and system catalogs.
 ```
+
+### Security gate before reading any hash
+
+First run a count-only capability check. It reveals no hashes:
+
+```sql
+SELECT
+  count(*) AS total_users,
+  count(*) FILTER (
+    WHERE encrypted_password IS NOT NULL AND encrypted_password <> ''
+  ) AS users_with_password_hash
+FROM auth.users;
+```
+
+Continue only when `users_with_password_hash > 0`, every expected password user
+is accounted for, the user explicitly approves sensitive hash handling, and the
+agent can avoid user-facing output and ordinary logs. OAuth and passwordless users
+may correctly have no password hash and need their provider-specific migration
+path. The hash values necessarily pass through MCP/agent execution. Never paste
+them into chat, print them, commit them, or store them in a normal project
+directory. Delete any protected temporary artifact after verification.
 
 ### What you can export
 
@@ -49,6 +79,14 @@ storage.objects, and system catalogs.
 - Can export passwords (bcrypt hashes)
 - Can read schema metadata for automatic migration
 - No need to deploy edge functions first
+
+Verified history:
+- Full password-preserving migration tested on 2026-03-21 and 2026-07-06.
+- Count-only access to non-empty `encrypted_password` values rechecked on
+  2026-08-31 without returning any hash.
+
+If access is missing, some users have empty hashes, or handling cannot be kept
+appropriately protected, stop and use the official password-reset route.
 
 ---
 
@@ -152,9 +190,12 @@ for (const file of files) {
 
 | Method | Auth users | Passwords | Schema | Data | Storage | Requires |
 |---|---|---|---|---|---|---|
-| Native export | Yes | Yes | Yes | Yes | Metadata only | One button click (+ pg_restore w/zstd) |
-| MCP query_database | Yes | Yes | Yes | Yes | Via URLs | Claude Code + Lovable MCP |
+| Native export | Yes/verify | No usable passwords guaranteed; reset | Yes | Yes | Metadata only | One button click (+ pg_restore w/zstd) |
+| MCP query_database | Yes | Yes, advanced and capability-dependent | Yes | Yes | Via URLs | MCP-compatible agent + Lovable MCP + explicit approval |
 | Edge Function | Partial | No | No | Yes | Partial | Lovable chat |
 | REST API | No | No | No | Partial | No | URL + anon key |
 
-**Recommendation:** Use Method 0 (native export) whenever available - one click, complete, official. Fall back to Method 1 (MCP) for databases over 5 GB or when the export is unavailable. Storage files always travel separately in every method.
+**Recommendation:** Use Method 0 for the database whenever available and plan a
+password reset. Use Method 1 only when preserving passwords materially matters,
+the capability check passes, and the user accepts the sensitive MCP path. Storage
+files always travel separately in every method.

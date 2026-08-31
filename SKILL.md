@@ -6,8 +6,8 @@ metadata:
   author: Carol Monroe - Lovable Champion and Supabase SupaSquad Member
   author_url: https://carolmonroe.com
   author_github: CarolMonroe22
-  version: "4.0.2"
-  tested: "2026-07-06"
+  version: "4.1.0"
+  tested: "2026-08-31"
   tags:
     - supabase
     - lovable
@@ -21,8 +21,23 @@ metadata:
 # Lovable Cloud to Own Supabase Migration
 
 > Created by **Carol Monroe** - Lovable Champion and Supabase SupaSquad Member
-> Every step verified on a real end-to-end migration (12 tables, 237 rows, 23 users,
-> 40 storage files, 5 edge functions, 2 cron jobs). Last verified 2026-07-06.
+> The full migration was verified on a real end-to-end migration (12 tables,
+> 237 rows, 23 users, 40 storage files, 5 edge functions, 2 cron jobs) on
+> 2026-07-06. Password-hash access through Lovable MCP was rechecked on
+> 2026-08-31 without exposing any hash values.
+
+## What Changed in v4.1 (August 2026)
+
+Lovable's current official documentation now says that user passwords are not
+exported in a usable form and recommends a password-reset flow for migrated
+users. The native export is still the primary source for the database, but it
+must no longer be presented as a guaranteed password-preserving export.
+
+There is a separate advanced route: Lovable MCP `query_database` can still read
+`auth.users.encrypted_password` on supported Cloud projects. A boolean-only
+capability check succeeded on 2026-08-31, and the complete hash-preserving flow
+was previously verified in March and July 2026. This route is optional,
+sensitive, and subject to change because Lovable MCP is a research preview.
 
 ## What Changed in v4 (July 2026)
 
@@ -32,9 +47,10 @@ This rewrites the migration playbook:
 
 - The old "Cloud can never be disconnected" fact is obsolete. You can now export
   your database, remove Cloud from the SAME project, and connect your own Supabase.
-- The native export file (a `pg_dump` custom-format backup) is now the PRIMARY data
-  source. It carries things the MCP flow had to reconstruct by hand, including
-  auth users WITH password hashes and identities.
+- The native export file (a `pg_dump` custom-format backup) is now the PRIMARY
+  database source. Do not assume it preserves usable passwords. Follow the
+  official reset path by default, or explicitly opt into the advanced MCP hash
+  route after a capability check and security confirmation.
 - The old 68-step MCP migration into a fresh Lovable project is now the FALLBACK
   path, kept for the cases the native export cannot serve.
 
@@ -46,10 +62,12 @@ somehow present, this one wins - delete the older one.
 ## What This Skill Does
 
 Migrates an entire Lovable Cloud project to your own Supabase: database schema,
-data, RLS policies, functions, triggers, sequences, auth users with original
-passwords and identities, storage buckets and files, edge functions with correct
-per-function verify_jwt, cron jobs, and secrets inventory. Then removes Cloud and
-connects the user's own Supabase to the same Lovable project.
+data, RLS policies, functions, triggers, sequences, auth users and identities,
+storage buckets and files, edge functions with correct per-function verify_jwt,
+cron jobs, and secrets inventory. Then removes Cloud and connects the user's own
+Supabase to the same Lovable project. Passwords use the official reset path by
+default; the advanced MCP route can preserve existing hashes when available and
+explicitly approved.
 
 ## Decision Point (ALWAYS start here)
 
@@ -59,7 +77,7 @@ Ask what the user actually needs, then pick the path:
 |---|---|
 | "My app burns credits while I'm not working on it" | No migration. **Pause Cloud** (Cloud tab > Overview > Advanced settings). Done. |
 | "I want backups of my Cloud data" | No migration. **Export project data** works standalone, once per 24h, keep building on Cloud. |
-| Ready to run on own Supabase, database ≤ 5 GB | **SAME-PROJECT PATH** (primary, below): Export + Remove + Connect on the existing Lovable project. |
+| Ready to run on own Supabase, database ≤ 5 GB | **SAME-PROJECT PATH** (primary, below): Export + auth decision + Remove + Connect on the existing Lovable project. |
 | Database > 5 GB, export unavailable/failing, or user wants the original Cloud project kept untouched | **FRESH-PROJECT PATH** (legacy fallback): full MCP migration into a new Lovable project. See [references/fresh-project-path.md](references/fresh-project-path.md). |
 
 Remind the user: Export/Pause/Remove buttons cost no credits. Only agent prompts do.
@@ -87,7 +105,7 @@ to migrate, and Export-as-backup + Pause cover most worries now.
 | Lovable account with Cloud enabled | Everything | - |
 | Supabase account | Everything | https://supabase.com |
 | GitHub connected to the project | Everything (function code travels via the repo) | Editor > + menu > GitHub > Connect |
-| **Lovable MCP** | Strongly recommended - it makes life EASY: the baseline inventory, config.toml reading, and every source-side check become one tool call instead of manual dashboard reading | `/mcp` in Claude Code, or claude.ai Settings > Connectors - https://docs.lovable.dev/integrations/mcp-servers |
+| **Lovable MCP** | Strongly recommended for inventory and source-side checks; required for the optional password-hash preservation route | `/mcp` in Claude Code, or claude.ai Settings > Connectors - https://docs.lovable.dev/integrations/mcp-servers |
 | Supabase MCP | Destination-side automation (create project, run every verification) | Built into Claude Code - https://supabase.com/docs/guides/getting-started/mcp |
 | pg_restore 16+ with zstd | Same-project path Step 14 | macOS: `brew install postgresql@18` |
 | GitHub CLI (`gh`) | Fresh-project path only | `brew install gh` + `gh auth login` |
@@ -110,17 +128,20 @@ Ask the user which level they want before starting:
 Every level stops at the same hard checkpoints: cost confirmation, the Phase 7
 gate, and the Remove click.
 
-## Key Facts (verified 2026-07-06 on a live migration)
+## Key Facts
 
 ### The native export
 - Format: `pg_dump` v18 **custom format** with **zstd compression** (source Postgres 17).
 - Restoring requires `pg_restore` v16+ **built with zstd**. The libpq build from
   Homebrew does NOT include zstd and fails with "does not support compression with
   zstd" even when the version number looks fine. Use `postgresql@18` (Trap 18).
-- INCLUDED: full schema (public, auth, storage, cron, vault), all table data, RLS
-  policies, triggers, custom functions, sequences WITH current values,
-  `auth.users` + `auth.identities` WITH bcrypt password hashes, `cron.job` rows,
-  `storage.buckets` + `storage.objects` rows (METADATA ONLY).
+- The July 2026 test export contained full schema and table data, including auth
+  records. Current Lovable documentation says password material is not exported
+  in a usable form. Treat the official export as carrying users, not usable
+  passwords, and plan resets unless the optional MCP route is completed.
+- INCLUDED for the supported database flow: schema and data, RLS policies,
+  triggers, custom functions, sequences, cron and storage metadata. Verify every
+  component against the baseline because the export contract can change.
 - NOT included: storage FILES (actual bytes), edge function CODE (lives in the
   repo), edge function SECRET values, vault secret VALUES (rows restore but are
   encrypted with the old project's key, unrecoverable cross-project).
@@ -129,6 +150,20 @@ gate, and the Remove click.
   Cloud (Trap 17). Limits: 5 GB, one export per 24 hours.
 - The "we'll email you" toast is unreliable. Don't wait for the email: check
   Storage for the export bucket (~1 minute for a small database).
+
+### Passwords: official default vs advanced MCP route
+- **Official default:** Lovable says passwords are not exported in a usable form.
+  Build and test a password-reset flow before removing Cloud.
+- **Advanced option:** Run a capability check that returns only counts, never
+  hashes. If non-empty hashes are accessible, explain that the values will pass
+  through MCP/agent execution, obtain explicit approval, then migrate only the
+  minimum required auth fields.
+- Never paste hashes into chat, print them, commit them, or store them in a normal
+  project folder. Delete protected temporary artifacts after the login test.
+- If the capability check fails, the agent cannot guarantee secret-safe handling,
+  or any expected password user lacks a hash, use the reset path for that user.
+  OAuth and passwordless users may correctly have no hash. Do not improvise
+  passwords.
 
 ### The Lovable side
 - After connecting an own Supabase, the Lovable agent CAN deploy edge functions to
@@ -144,8 +179,9 @@ gate, and the Remove click.
 - Remix still does NOT work for migration - it inherits Lovable Cloud.
 
 ### Security
-- The `.backup` file contains password hashes and personal data. Treat it like a
-  password: keep it local, never commit it, delete it after the migration.
+- The `.backup` file contains personal and authentication data and may contain
+  sensitive credential material. Treat it like a password: keep it local, never
+  commit it, delete it after the migration.
 - If the database password touched a chat, a script, or an AI session during the
   migration, rotate it at the end (Dashboard > Settings > Database).
 - Before pushing any migration artifacts to a public repo, scan them for project
@@ -157,13 +193,14 @@ gate, and the Remove click.
 1. EXPORT      the database (button)
 2. DOWNLOAD    the export + the storage files    ← they live inside Cloud
 3. BUILD       the new Supabase (restore, fix, upload, deploy)
-4. VERIFY      the 12-count gate — ALL GREEN or stop
-5. REMOVE      Lovable Cloud                     ← only now, nothing before this is destructive
-6. CONNECT     your own Supabase to the same project
+4. AUTH        test password reset, or explicitly run the MCP hash route
+5. VERIFY      the 12-count gate — ALL GREEN or stop
+6. REMOVE      Lovable Cloud                     ← only now, nothing before this is destructive
+7. CONNECT     your own Supabase to the same project
 ```
 
 Nothing is removed until its replacement is alive and verified. At every step
-before 5, the app still runs on Cloud, untouched. If any step fails, stop and fix -
+before 6, the app still runs on Cloud, untouched. If any step fails, stop and fix -
 Cloud is the safety net until the gate is green.
 
 ## SAME-PROJECT PATH (primary)
@@ -177,17 +214,18 @@ Read it when actually running the migration. The shape:
 | 1. Baseline + GitHub | 1-4 | 12-count inventory, repo connected, verify_jwt + secrets map | Connect GitHub if missing |
 | 2. Export + Download | 5-8 | Official export triggered, found in Storage, downloaded, storage files downloaded | Export click, downloads |
 | 3. Create destination | 9-12 | Supabase project, session pooler connection string | Confirm cost |
-| 4. Restore | 13-16 | zstd-capable pg_restore, identities fix pass, snapshot check | - |
+| 4. Restore | 13-16 | zstd-capable pg_restore, identities fix pass, auth decision, snapshot check | Approve advanced hash route or use reset |
 | 5. Post-restore fixups | 17-21 | Cron recreate + zombie hunt, ghost rows cleared, files uploaded, URLs rewritten, sequences | - |
 | 6. Functions + secrets | 22-25 | Deploy (CLI/MCP/agent), secrets re-entered, AI re-wired, temp helpers deleted everywhere | Enter secrets |
-| 7. THE GATE | 26-28 | 12-category audit vs baseline + real login + image opens | Gate decision |
+| 7. THE GATE | 26-28 | 12-category audit vs baseline + tested auth path + image opens | Gate decision |
 | 8. Remove + Connect | 29-33 | Remove Cloud, connect own Supabase, fix integration overwrite, final tidy | Remove + Connect clicks |
 
 ### Hard stops (never skip, at any migration level)
 
 1. **Cost confirmation** before creating the Supabase project (Step 9).
-2. **The gate** (Step 28): every count green + one real login with an original
-   password, or DO NOT proceed. Cloud stays as the safety net.
+2. **The gate** (Step 28): every count green + one tested login through the chosen
+   auth path (original password after MCP preservation, or completed reset), or
+   DO NOT proceed. Cloud stays as the safety net.
 3. **Remove is the only destructive click** (Step 29) and it is always the user's
    hand, never automated, never before the gate.
 
@@ -231,6 +269,12 @@ That reference keeps its own trap table (Traps 1-16) and troubleshooting rows.
 | 25 | Surprise (good) | LOVABLE_API_KEY survives Cloud removal (workspace secret) | Re-wire: server functions (recommended) or copy the key (Step 24) |
 | 26 | Data loss | Restore is a snapshot at EXPORT time; later writes are missing | Ask when writes stopped; re-export or re-apply deltas (Step 16) |
 
+## Trap Added in v4.1
+
+| Trap | Severity | Description | Prevention |
+|---|---|---|---|
+| 27 | Account lockout | Current Lovable docs say official exports do not contain usable passwords | Default to reset; use the MCP hash route only after capability check, explicit approval, and secure handling |
+
 ## Human Assistance Points (same-project path)
 
 | Step | What the user must do | Why not automated |
@@ -260,7 +304,7 @@ That reference keeps its own trap table (Traps 1-16) and troubleshooting rows.
 
 | Resource | URL |
 |---|---|
-| Lovable Cloud (export, pause, remove) | https://docs.lovable.dev/integrations/cloud |
+| Lovable Cloud advanced settings (export, pause, remove) | https://docs.lovable.dev/features/advanced-settings |
 | Lovable GitHub integration | https://docs.lovable.dev/integrations/github |
 | Lovable MCP | https://docs.lovable.dev/integrations/mcp-servers |
 | Supabase: restore a backup | https://supabase.com/docs/guides/platform/migrating-within-supabase/dashboard-restore |

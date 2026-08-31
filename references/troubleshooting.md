@@ -58,21 +58,36 @@ The Lovable sandbox can't reach private repos when you send a URL via chat.
 
 ## Auth passwords not migrating
 
-**Old guidance (WRONG):** "Passwords can't be exported"
-**Correct:** Passwords CAN be migrated via Lovable MCP.
+There are now two different answers:
+
+- **Official Lovable export:** current docs say passwords are not exported in a
+  usable form. Configure and test a reset flow.
+- **Advanced Lovable MCP route:** password hashes can still be migrated when the
+  project exposes `auth.users.encrypted_password` and the user explicitly accepts
+  the sensitive handling path.
 
 ```sql
--- Read from original (Lovable MCP query_database)
-SELECT id, email, encrypted_password FROM auth.users;
-
--- Write to new (Supabase MCP execute_sql)  
-INSERT INTO auth.users (id, email, encrypted_password, ...)
-VALUES ('{id}', '{email}', '{exact_bcrypt_hash}', ...);
+-- Capability check only. This returns counts, never hash values.
+SELECT
+  count(*) AS total_users,
+  count(*) FILTER (
+    WHERE encrypted_password IS NOT NULL AND encrypted_password <> ''
+  ) AS users_with_password_hash
+FROM auth.users;
 ```
 
-Never generate temporary passwords. Always copy the original bcrypt hash.
+If `users_with_password_hash > 0`, confirm that every expected password user is
+accounted for, then follow Method 1 in `export-methods.md`. OAuth and passwordless
+users may correctly have no hash. The hashes necessarily pass through MCP/agent
+execution, so get explicit approval first and never display, paste, print, log,
+or commit them. If the capability check fails or secret-safe handling is
+unavailable, stop and use resets.
 
-Docs: [Supabase Auth Admin API](https://supabase.com/docs/reference/javascript/admin-api)
+Never generate temporary passwords. When using the advanced route, copy the
+original bcrypt hash exactly and verify one real login before removing Cloud.
+
+Docs: [Lovable advanced settings](https://docs.lovable.dev/features/advanced-settings) |
+[Supabase password-hash migration](https://supabase.com/docs/guides/platform/migrating-to-supabase/auth0)
 
 ---
 

@@ -1,18 +1,22 @@
 # Lovable Cloud to Supabase Migration
 
-[![Version](https://img.shields.io/badge/version-4.0.2-FF5CD7)](https://github.com/CarolMonroe22/lovable-cloud-to-supabase-migration)
-[![Tested](https://img.shields.io/badge/tested-2026--07--06-green)](https://github.com/CarolMonroe22/lovable-cloud-to-supabase-migration)
+[![Version](https://img.shields.io/badge/version-4.1.0-FF5CD7)](https://github.com/CarolMonroe22/lovable-cloud-to-supabase-migration)
+[![Tested](https://img.shields.io/badge/tested-2026--08--31-green)](https://github.com/CarolMonroe22/lovable-cloud-to-supabase-migration)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](./LICENSE)
 
 ![Moving day: from Lovable Cloud to your own Supabase](assets/hero.png)
 
-Migrate your entire Lovable Cloud project to your own Supabase. Schema, data, auth users (with original passwords and identities), storage, edge functions with correct verify_jwt, cron jobs, and a verified switch of the SAME Lovable project to your own Supabase.
+Migrate your entire Lovable Cloud project to your own Supabase. Schema, data,
+auth users and identities, storage, edge functions with correct verify_jwt, cron
+jobs, and a verified switch of the SAME Lovable project to your own Supabase.
+Password resets are the official default; an advanced MCP route can preserve
+existing hashes when available and explicitly approved.
 
 | | |
 |---|---|
 | **From** | Lovable Cloud (managed backend) |
 | **To** | Your own Supabase project (full dashboard, custom emails, service role key) |
-| **What moves** | Everything: schema, data, auth users with passwords and identities, storage, edge functions, cron jobs |
+| **What moves** | Schema, data, auth users and identities, storage, edge functions, cron jobs; passwords require reset by default or the optional MCP route |
 | **How** | Official Export + Remove + Connect on your existing project (primary path), with the full MCP rebuild kept as fallback |
 
 ## Install
@@ -23,14 +27,27 @@ npx skills add CarolMonroe22/lovable-cloud-to-supabase-migration
 
 Once installed, your AI agent picks it up automatically whenever you ask about migrating from, exporting, or removing Lovable Cloud.
 
-## v4.0.0 - What's New
+## v4.1.0 - Password export clarification
+
+Lovable's current documentation says the official project export does not contain
+user passwords in a usable form, so the supported default is a password reset.
+That is different from the advanced MCP path: `query_database` can still access
+`auth.users.encrypted_password` on supported Cloud projects. Count-only access
+was rechecked on 2026-08-31 without exposing any hash value.
+
+The skill now makes that distinction everywhere. It preserves the MCP method,
+but gates it behind a capability check, explicit consent, and strict handling.
+Lovable MCP is a research preview, so the reset route remains the reliable
+fallback.
+
+## v4.0.0 - Official Export + Remove + Connect
 
 **Lovable Cloud is no longer permanent.** In July 2026 Lovable shipped official **Export**, **Pause**, and **Remove** buttons (Cloud tab > Overview > Advanced settings). v4 is a rewrite around that reality, verified end to end on a real migration: 12 tables, 237 rows, 23 users with passwords, 40 storage files, 5 edge functions, 2 cron jobs, all accounted for on the other side.
 
 | New in v4 | What it does |
 |---|---|
 | Decision point | Same-project path (Export + Remove + Connect, NEW primary) vs fresh-project path (legacy fallback) vs just Pause |
-| Native export as data source | The official `pg_dump` export carries schema, data, RLS, triggers, sequences, cron rows, and auth users WITH password hashes |
+| Native export as data source | The official `pg_dump` export carries the database; current docs do not guarantee usable passwords |
 | The sacred order | Export -> DOWNLOAD -> build -> 12-count verification gate -> only then Remove |
 | 10 new verified traps (17-26) | zstd restore tooling, identities FK ordering, cron permission + zombie URLs, storage ghost rows + protect_delete, signed URL death, client.ts overwrite breaking SSR, temp functions replicating via GitHub sync, LOVABLE_API_KEY survival, export-time snapshot |
 | Lovable agent capabilities mapped | It CAN deploy edge functions to your connected Supabase (verified). It CANNOT set secrets - only you can |
@@ -58,7 +75,7 @@ The v3.1 flow (68 deterministic steps into a fresh Lovable project) is preserved
 | 4. Restore | `pg_restore` of the official backup (zstd-capable tooling), identities fix pass |
 | 5. Post-restore fixups | Cron recreation + zombie URL hunt, storage ghost-row cleanup, file upload, URL rewriting |
 | 6. Functions + secrets | Deploy via CLI / MCP / Lovable agent; secrets re-entered by you; Lovable AI re-wired |
-| 7. The gate | Full 12-category comparison vs baseline + real login with an original password. All green or stop |
+| 7. The gate | Full 12-category comparison vs baseline + tested reset or original-password login after MCP preservation. All green or stop |
 | 8. Remove + Connect | Remove Cloud, connect your own Supabase to the SAME project, fix the integration overwrite |
 
 ## What Gets Migrated
@@ -68,7 +85,7 @@ The v3.1 flow (68 deterministic steps into a fresh Lovable project) is preserved
 | Database schema (tables, enums, constraints, indexes, sequences with values) | In the official export |
 | RLS policies, custom functions, triggers | In the official export |
 | All table data | In the official export |
-| Auth users with original passwords + identities | In the official export (identities need a known fix pass) |
+| Auth users + identities | Verify after restore; official password path requires resets |
 | Cron jobs | Rows in the export; recreated via cron.schedule with fresh URLs |
 | Storage buckets | In the official export |
 | Storage files | Downloaded and re-uploaded (never in any DB export) |
@@ -82,11 +99,11 @@ The v3.1 flow (68 deterministic steps into a fresh Lovable project) is preserved
 
 ## Good to Know
 
-- **Your users keep their passwords.** The official export includes the complete auth schema with bcrypt hashes. Real login with an original password is part of the verification gate.
+- **Passwords have two paths.** Official export means reset. The optional MCP path can preserve hashes when the capability check passes and the sensitive flow is approved.
 - **Your Lovable project stays your Lovable project.** Same editor, same repo, same URL - only the backend home changes.
-- **The export file deserves password-level care.** It contains your users' hashes and personal data. Keep it local, delete it after verifying.
+- **The export file deserves password-level care.** It contains personal and authentication data and may contain credential material. Keep it local, delete it after verifying.
 - **Buttons are free.** Export, Pause, Remove and Connect cost no credits; only agent prompts do.
-- **Tested July 2026.** Lovable ships fast; if a button moved, the concepts still hold.
+- **Tested August 2026.** Lovable ships fast; re-run capability checks before relying on MCP behavior.
 
 ## Not using Claude Code?
 

@@ -4,6 +4,11 @@
 > project. Read SKILL.md first for the decision point, the sacred order, and
 > the hard stops. This file is the operational playbook.
 
+> Auth note, updated 2026-08-31: Lovable's official export documentation now
+> says passwords are not exported in a usable form. Use the reset path by
+> default. The separate MCP hash-preservation option is documented in
+> `export-methods.md` and requires a capability check plus explicit approval.
+
 
 ### Phase 1: Baseline + GitHub - Steps 1-4
 
@@ -137,6 +142,15 @@ Step 15: Fix auth.identities (Trap 19 - FK ordering)
   pg_restore --data-only -n auth -t identities -d "<conn_string>" <backup_path>
   Re-run the count. users == identities == baseline, or stop.
 
+  Do NOT treat matching user counts as proof that original passwords work.
+  Choose the auth path now, while Cloud is still available:
+  A. OFFICIAL DEFAULT: configure and test password recovery in the destination.
+     Tell migrated users they must set a new password.
+  B. ADVANCED MCP OPTION: follow references/export-methods.md Method 1. Start
+     with the count-only capability check, explain that hashes pass through
+     MCP/agent execution, obtain explicit approval, and migrate the minimum
+     required auth fields. If any check fails, return to path A.
+
 Step 16: Snapshot awareness (Trap 26)
   The restore reflects the database AT EXPORT TIME. Any data changed on Cloud
   after the export (including auth metadata cleanups) is NOT in the file.
@@ -250,7 +264,9 @@ Step 26: Re-run the 12-count audit on the DESTINATION
   vault secret names re-entered, old_ref_leaks = 0.
 
 Step 27: Functional checks
-  - Log in with a REAL migrated user and their ORIGINAL password.
+  - Test the chosen auth path with a REAL migrated user:
+    - reset path: complete recovery, set a new password, then log in;
+    - MCP hash path: log in with the original password.
   - Open a real storage image in the browser.
   - Invoke one edge function (or accept deferred deploy, path C).
 
@@ -305,7 +321,7 @@ Step 33: Final tidy
   - Rotate the DB password if it touched any chat/script/AI session.
   - Recreate OAuth providers (Google etc.): client ID/secret + redirect URI
     https://<new_ref>.supabase.co/auth/v1/callback + Site URL.
-  - Delete the local .backup (it holds password hashes) once verified.
+  - Delete the local .backup and any protected auth artifact once verified.
   - Optional: JWT secret copy (dashboard-only) if existing sessions must survive.
   - If external workers (Fly.io, Railway, ...) point at the old URL, re-point them.
 ```
@@ -329,8 +345,8 @@ Step 33: Final tidy
 | AI features dead after migration | Edge functions can't read Lovable's secret store (Trap 25) | Server functions or copy LOVABLE_API_KEY |
 | Recent user/data changes missing in new project | Export predates them (Trap 26) | Re-export or re-apply deltas |
 | Export email never arrives | Toast/email unreliable | Check Storage for database_export_* bucket |
+| Original passwords fail after restore | Current official export does not guarantee usable passwords (Trap 27) | Complete reset flow, or run the optional MCP hash route before removing Cloud |
 
 Legacy symptoms (fresh-project path) remain in
 [fresh-project-path.md](fresh-project-path.md) and
 [troubleshooting.md](troubleshooting.md).
-
