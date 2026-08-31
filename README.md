@@ -1,6 +1,6 @@
 # Lovable Cloud to Supabase Migration
 
-[![Version](https://img.shields.io/badge/version-4.1.0-FF5CD7)](https://github.com/CarolMonroe22/lovable-cloud-to-supabase-migration)
+[![Version](https://img.shields.io/badge/version-4.1.1-FF5CD7)](https://github.com/CarolMonroe22/lovable-cloud-to-supabase-migration)
 [![Tested](https://img.shields.io/badge/tested-2026--08--31-green)](https://github.com/CarolMonroe22/lovable-cloud-to-supabase-migration)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](./LICENSE)
 
@@ -27,6 +27,14 @@ npx skills add CarolMonroe22/lovable-cloud-to-supabase-migration
 
 Once installed, your AI agent picks it up automatically whenever you ask about migrating from, exporting, or removing Lovable Cloud.
 
+## v4.1.1 - Attribution correction
+
+Lovable never documented or endorsed password-hash migration. Carol found the
+method in an external community guide, tested it herself, and incorporated the
+working approach into this skill. The official Lovable position is the reset
+path; hash preservation remains a community-derived, independently verified MCP
+workaround.
+
 ## v4.1.0 - Password export clarification
 
 Lovable's current documentation says the official project export does not contain
@@ -34,6 +42,9 @@ user passwords in a usable form, so the supported default is a password reset.
 That is different from the advanced MCP path: `query_database` can still access
 `auth.users.encrypted_password` on supported Cloud projects. Count-only access
 was rechecked on 2026-08-31 without exposing any hash value.
+
+Lovable never presented that MCP/SQL technique as an official capability. Carol
+learned it from a community guide and verified it independently.
 
 The skill now makes that distinction everywhere. It preserves the MCP method,
 but gates it behind a capability check, explicit consent, and strict handling.
@@ -99,7 +110,7 @@ The v3.1 flow (68 deterministic steps into a fresh Lovable project) is preserved
 
 ## Good to Know
 
-- **Passwords have two paths.** Official export means reset. The optional MCP path can preserve hashes when the capability check passes and the sensitive flow is approved.
+- **Passwords have two paths.** Official export means reset. The optional, community-derived MCP path can preserve hashes when the capability check passes and the sensitive flow is approved. Lovable has never documented or endorsed that workaround.
 - **Your Lovable project stays your Lovable project.** Same editor, same repo, same URL - only the backend home changes.
 - **The export file deserves password-level care.** It contains personal and authentication data and may contain credential material. Keep it local, delete it after verifying.
 - **Buttons are free.** Export, Pause, Remove and Connect cost no credits; only agent prompts do.
